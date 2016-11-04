@@ -54,12 +54,12 @@ CREATE TABLE `dataset` (
 	`dataset_title` TEXT NOT NULL,
     `taxon` VARCHAR(50) NOT NULL,
     `type` TEXT NOT NULL,
-	`dataset_description` TEXT#,
+	`dataset_description` TEXT,
 
 	# Foreign keys
-#	FOREIGN KEY (db_fk)
-#		REFERENCES db(db_id)
-	#	ON DELETE RESTRICT
+	FOREIGN KEY (db_fk)
+		REFERENCES db(id)
+		ON DELETE RESTRICT
 );
 
 ##############################
@@ -84,7 +84,7 @@ DROP TABLE IF EXISTS `attribute`;
 CREATE TABLE `attribute` (
 	# Fields
 	`id` INT AUTO_INCREMENT PRIMARY KEY,
-    `tool_fk` INT NOT NULL,
+    `tool_fk` INT NULL,
 	`attribute_name` VARCHAR(20) NOT NULL,
 	`attribute_description` TEXT,
     
@@ -137,16 +137,16 @@ CREATE TABLE `canned_analysis` (
 ##### 2.7 cAnalysis data
 ##############################
 
-DROP TABLE IF EXISTS `analysis_metadata`;
-CREATE TABLE `analysis_metadata` (
+DROP TABLE IF EXISTS `canned_analysis_metadata`;
+CREATE TABLE `canned_analysis_metadata` (
 	# Fields
 	`id` INT AUTO_INCREMENT PRIMARY KEY,
-	`analysis_fk` INT NOT NULL,
+	`canned_analysis_fk` INT NOT NULL,
 	`attribute_fk` INT NOT NULL,
 	`value` VARCHAR(20) NOT NULL,
 
 	# Foreign keys
-	FOREIGN KEY (analysis_fk)
+	FOREIGN KEY (canned_analysis_fk)
 		REFERENCES canned_analysis(id)
 		ON DELETE RESTRICT,
 
