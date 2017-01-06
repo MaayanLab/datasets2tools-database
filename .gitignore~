@@ -1,4 +1,5 @@
 project-datasets2tools-database.sublime-project
 project-datasets2tools-database.sublime-workspace
-euclid
-py/dbconnection.json
+.ruffus_history.sqlite
+mysql/dbconnection.json
+reports

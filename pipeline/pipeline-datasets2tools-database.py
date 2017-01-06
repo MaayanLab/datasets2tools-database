@@ -25,11 +25,49 @@ import euclid
 ########## 2. General setup
 #############################################
 ##### 1. Default variables #####
-
+dbname = 'datasets2tools'
 
 #######################################################
 #######################################################
-########## S1. Euclid
+########## S1. Create Database
+#######################################################
+#######################################################
+
+@files(['mysql/dbconnection.json', 'mysql/dbschema.sql'],
+	   'reports/01-dbschema.txt')
+
+def createDatasets2toolsDatabase(infiles, outfile):
+
+	# Split infiles
+	connectionFile, sqlFile = infiles
+
+	# Get connection
+	dbEngine = DBConnection.create('local', connectionFile)
+
+	# Create and use new database
+	DBConnection.executeCommand('DROP DATABASE IF EXISTS %(dbname)s' % globals(), dbEngine)
+	DBConnection.executeCommand('CREATE DATABASE %(dbname)s' % globals(), dbEngine)
+	DBConnection.executeCommand('USE %(dbname)s' % globals(), dbEngine)
+
+	# Update connection
+	dbEngine = DBConnection.create('local', connectionFile, dbname)
+
+	# Read SQL file
+	with open(sqlFile, 'r') as openfile:
+		sqlCommandString = openfile.read()
+
+	# Get commands
+	sqlCommandList = [x for x in sqlCommandString.split(';') if x != '\n']
+
+	# Loop through commands
+	for sqlCommand in sqlCommandList:
+
+		# Execute command
+		DBConnection.executeCommand(sqlCommand, dbEngine)
+
+#######################################################
+#######################################################
+########## S2. Euclid Data
 #######################################################
 #######################################################
 
@@ -38,7 +76,7 @@ import euclid
 #############################################
 
 @files('mysql/dbconnection.json',
-	   'reports/01-euclid.txt')
+	   'reports/02-euclid.txt')
 
 def migrateEuclidData(infile, outfile):
 
@@ -48,14 +86,6 @@ def migrateEuclidData(infile, outfile):
 
 	# Get euclid data
 	euclidDataDict = euclid.getData(localEngine)
-
-	# Define database name
-	dbname = 'datasets2tools'
-
-	# Create and use new database
-	DBConnection.executeCommand('DROP DATABASE IF EXISTS %(dbname)s' % locals(), localEngine)
-	DBConnection.executeCommand('CREATE DATABASE %(dbname)s' % locals(), localEngine)
-	DBConnection.executeCommand('USE %(dbname)s' % locals(), localEngine)
 
 	# Upload tables
 	euclid.uploadTables(euclidDataDict, localEngine)
