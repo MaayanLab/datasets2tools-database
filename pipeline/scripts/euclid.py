@@ -30,7 +30,7 @@ nDatasets = 100
 def DBgetDatasetTable(engine):
 
 	# Get Query String
-	queryString = ''' SELECT id, accession, record_type
+	queryString = ''' SELECT id, accession
 						FROM dataset
 						WHERE record_type='geo' AND id < %(nDatasets)s ''' % globals()
 
@@ -98,7 +98,8 @@ def getToolTable(engine):
 def getCannedAnalysisTable(engine):
 
 	# Get Query String
-	queryString = ''' SELECT tal.id, dataset_fk, target_app_fk AS tool_fk, link FROM target_app_link tal
+	queryString = ''' SELECT tal.id, dataset_fk, target_app_fk AS tool_fk, link AS canned_analysis_url
+						FROM target_app_link tal
 						LEFT JOIN gene_list gl
 					    ON gl.id = tal.gene_list_fk
 							LEFT JOIN gene_signature gs
@@ -201,24 +202,6 @@ def getData(engine):
 ########## S2. Data Upload
 #######################################################
 #######################################################
-
-#############################################
-########## 2.1 Upload Tables
-#############################################
-
-def uploadTables(euclidDataDict, engine):
-
-	# Select Field Types
-	fieldTypeDict = {'dataset': {'id': sqlalchemy.types.BIGINT, 'accession': sqlalchemy.types.TEXT, 'record_type': sqlalchemy.types.TEXT},
-					 'tool': {'id': sqlalchemy.types.BIGINT, 'name': sqlalchemy.types.TEXT},
-					 'canned_analysis': {'id': sqlalchemy.types.BIGINT, 'dataset_fk': sqlalchemy.types.BIGINT, 'target_app_fk': sqlalchemy.types.BIGINT, 'link': sqlalchemy.types.TEXT},
-					 'canned_analysis_metadata': {'id': sqlalchemy.types.BIGINT, 'canned_analysis_fk': sqlalchemy.types.BIGINT, 'variable': sqlalchemy.types.TEXT, 'value': sqlalchemy.types.TEXT}}
-	
-	# Loop Through Datasets
-	for dataset_key in euclidDataDict.keys():
-
-		# Load To Database
-		euclidDataDict[dataset_key].to_sql(dataset_key, engine, dtype=fieldTypeDict[dataset_key])
 
 #############################################
 ########## 2.2 Set Foreign Keys

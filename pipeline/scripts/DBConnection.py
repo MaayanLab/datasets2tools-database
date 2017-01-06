@@ -101,6 +101,15 @@ def executeCommand(commandString, engine):
 	# Close connection
 	connection.close()
 
+#############################################
+########## 2.3 Load Tables
+#############################################
+
+def uploadTable(dataframe, engine, table_name, if_exists='append', index_label=None, index=True):
+
+	# Upload
+	dataframe.to_sql(table_name, engine, if_exists=if_exists, index_label=index_label, index=index)
+
 #######################################################
 #######################################################
 ########## S. 

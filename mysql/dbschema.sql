@@ -31,7 +31,7 @@ CREATE TABLE `tool` (
 	`tool_icon_url` VARCHAR(100) NOT NULL,
 	`tool_homepage_url` VARCHAR(100) NOT NULL,
 	`tool_reference_url` VARCHAR(100),
-	`description` TEXT
+	`tool_description` TEXT
 );
 
 ##############################
@@ -56,6 +56,6 @@ CREATE TABLE `canned_analysis_metadata` (
 	# Fields
 	`id` INT AUTO_INCREMENT PRIMARY KEY,
 	`canned_analysis_fk` INT NOT NULL,
-	`variable` VARCHAR(30) NOT NULL,
-	`value` VARCHAR(30) NOT NULL
+	`variable` VARCHAR(50) NOT NULL,
+	`value` VARCHAR(100) NOT NULL
 );

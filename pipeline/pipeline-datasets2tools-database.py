@@ -65,6 +65,15 @@ def createDatasets2toolsDatabase(infiles, outfile):
 		# Execute command
 		DBConnection.executeCommand(sqlCommand, dbEngine)
 
+	# Write report
+	with open(outfile, 'w') as openfile:
+
+		# Get date stamp
+		timeString = time.strftime("%Y-%m-%d, %H:%M")
+
+		# Write
+		openfile.write('Completed %(timeString)s.' % locals())
+
 #######################################################
 #######################################################
 ########## S2. Euclid Data
@@ -75,23 +84,28 @@ def createDatasets2toolsDatabase(infiles, outfile):
 ########## 1. Euclid Data
 #############################################
 
+@follows(createDatasets2toolsDatabase)
+
 @files('mysql/dbconnection.json',
 	   'reports/02-euclid.txt')
 
 def migrateEuclidData(infile, outfile):
 
 	# Create engines
-	amazonEngine = DBConnection.create('amazon', infile)
+	amazonEngine = DBConnection.create('local', infile, 'datasets2tools')#DBConnection.create('amazon', infile)
 	localEngine = DBConnection.create('local', infile, 'euclid')
 
 	# Get euclid data
 	euclidDataDict = euclid.getData(localEngine)
 
-	# Upload tables
-	euclid.uploadTables(euclidDataDict, localEngine)
+	# Loop through tables
+	for tableKey in euclidDataDict.keys():
+
+		# Upload table
+		DBConnection.uploadTable(euclidDataDict[tableKey], amazonEngine, tableKey, index=False, index_label='id')
 
 	# Set foreign key checks
-	euclid.setForeignKeys(localEngine)
+	# euclid.setForeignKeys(localEngine)
 
 	# Write report
 	with open(outfile, 'w') as openfile:
