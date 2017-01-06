@@ -4,3 +4,5 @@ project-datasets2tools-database.sublime-workspace
 .ruffus_history.sqlite
 mysql/dbconnection.json
 reports
+data
+*.ipynb

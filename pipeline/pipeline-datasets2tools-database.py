@@ -13,13 +13,12 @@
 ##### 1. Python modules #####
 from ruffus import *
 import glob, sys, os, time
+import pandas as pd
 
 ##### 2. Custom modules #####
 # Pipeline running
 sys.path.append('pipeline/scripts')
-sys.path.append('pipeline/scripts/euclid')
-import DBConnection
-import euclid
+import DBConnection, euclid, associationData
 
 #############################################
 ########## 2. General setup
@@ -27,13 +26,21 @@ import euclid
 ##### 1. Default variables #####
 dbname = 'datasets2tools'
 
+##### 2. Functions #####
+### 2.1 Write report
+def writeReport(outfile):
+	with open(outfile, 'w') as openfile:
+		timeString = time.strftime("%Y-%m-%d, %H:%M")
+		openfile.write('Completed %(timeString)s.' % locals())
+
 #######################################################
 #######################################################
 ########## S1. Create Database
 #######################################################
 #######################################################
 
-@files(['mysql/dbconnection.json', 'mysql/dbschema.sql'],
+@files(['mysql/dbconnection.json',
+	    'mysql/dbschema.sql'],
 	   'reports/01-dbschema.txt')
 
 def createDatasets2toolsDatabase(infiles, outfile):
@@ -66,13 +73,7 @@ def createDatasets2toolsDatabase(infiles, outfile):
 		DBConnection.executeCommand(sqlCommand, dbEngine)
 
 	# Write report
-	with open(outfile, 'w') as openfile:
-
-		# Get date stamp
-		timeString = time.strftime("%Y-%m-%d, %H:%M")
-
-		# Write
-		openfile.write('Completed %(timeString)s.' % locals())
+	writeReport(outfile)
 
 #######################################################
 #######################################################
@@ -108,13 +109,46 @@ def migrateEuclidData(infile, outfile):
 	# euclid.setForeignKeys(localEngine)
 
 	# Write report
-	with open(outfile, 'w') as openfile:
+	writeReport(outfile)
 
-		# Get date stamp
-		timeString = time.strftime("%Y-%m-%d, %H:%M")
+#######################################################
+#######################################################
+########## S2. Association Data
+#######################################################
+#######################################################
 
-		# Write
-		openfile.write('Completed %(timeString)s.' % locals())
+#############################################
+########## 2.1 Association Data
+#############################################
+
+@follows(migrateEuclidData)
+
+@files(['mysql/dbconnection.json',
+		'data/dataset_tool_associations.xlsx'],
+		'reports/03-dataset_tool_associations.txt')
+
+def loadAssociationTools(infiles, outfile):
+
+	# Split infiles
+	connectionFile, associationFile = infiles
+
+	# Get tool list dataframe
+	toolListDataframe = associationData.getToolListDataframe(associationFile)
+
+	# Get tool category dataframe
+	toolCategoryDataframe = associationData.getToolCategoryDataframe(associationFile)
+
+	# Merge dataframes
+	mergedToolDataframeSubset = associationData.mergeToolDataframes(toolListDataframe, toolCategoryDataframe)
+
+	# Get engine
+	engine = DBConnection.create('local', connectionFile, 'datasets2tools')
+
+	# Upload data
+	DBConnection.uploadTable(mergedToolDataframeSubset, engine, 'tool', index=False)
+
+	# Write report
+	writeReport(outfile)
 
 #######################################################
 #######################################################

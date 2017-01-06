@@ -30,7 +30,7 @@ CREATE TABLE `tool` (
 	`tool_name` VARCHAR(30) NOT NULL,
 	`tool_icon_url` VARCHAR(100) NOT NULL,
 	`tool_homepage_url` VARCHAR(100) NOT NULL,
-	`tool_reference_url` VARCHAR(100),
+	`doi` VARCHAR(50),
 	`tool_description` TEXT
 );
 
