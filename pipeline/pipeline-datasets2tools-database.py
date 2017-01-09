@@ -39,6 +39,8 @@ def writeReport(outfile):
 #######################################################
 #######################################################
 
+@follows(mkdir('reports'))
+
 @files(['mysql/dbconnection.json',
 	    'mysql/dbschema.sql'],
 	   'reports/01-dbschema.txt')
@@ -118,14 +120,14 @@ def migrateEuclidData(infile, outfile):
 #######################################################
 
 #############################################
-########## 2.1 Association Data
+########## 2.1 Load Tools
 #############################################
 
 @follows(migrateEuclidData)
 
 @files(['mysql/dbconnection.json',
 		'data/dataset_tool_associations.xlsx'],
-		'reports/03-dataset_tool_associations.txt')
+		'reports/03-association_tools.txt')
 
 def loadAssociationTools(infiles, outfile):
 
@@ -142,10 +144,77 @@ def loadAssociationTools(infiles, outfile):
 	mergedToolDataframeSubset = associationData.mergeToolDataframes(toolListDataframe, toolCategoryDataframe)
 
 	# Get engine
-	engine = DBConnection.create('local', connectionFile, 'datasets2tools')
+	dbEngine = DBConnection.create('local', connectionFile, 'datasets2tools')
+
+	# Get names of existing tools
+	existingTools = DBConnection.executeQuery('select tool_name from tool', dbEngine).tool_name.tolist()
+
+	# Get names of tools to remove
+	toolsToRemove = set(existingTools).intersection(mergedToolDataframeSubset['tool_name'])
+
+	# Drop existing tools
+	mergedToolDataframeSubset = mergedToolDataframeSubset.set_index('tool_name', drop=False).drop(toolsToRemove)
 
 	# Upload data
-	DBConnection.uploadTable(mergedToolDataframeSubset, engine, 'tool', index=False)
+	DBConnection.uploadTable(mergedToolDataframeSubset, dbEngine, 'tool', index=False)
+
+	# Write report
+	writeReport(outfile)
+
+#############################################
+########## 2.2 Load Datasets
+#############################################
+
+@follows(loadAssociationTools)
+
+@files(['mysql/dbconnection.json',
+		'data/dataset_tool_association_table.txt'],
+		'reports/04-association_datasets.txt')
+
+def loadAssociationDatasets(infiles, outfile):
+
+	# Split infiles
+	connectionFile, associationTextFile = infiles
+
+	# Get engine
+	dbEngine = DBConnection.create('local', connectionFile, 'datasets2tools')
+
+	# Get dataframe
+	datasetDataframe = pd.read_table(associationTextFile)['dataset_accession'].drop_duplicates()
+
+	# Load data
+	DBConnection.uploadTable(datasetDataframe, dbEngine, 'dataset', index=False)
+
+	# Write report
+	writeReport(outfile)
+
+
+#############################################
+########## 2.3 Load Associations
+#############################################
+
+@follows(loadAssociationDatasets)
+
+@files(['mysql/dbconnection.json',
+		'data/dataset_tool_association_table.txt'],
+		'reports/05-dataset_tool_associations.txt')
+
+def loadDatasetToolAssociations(infiles, outfile):
+
+	# Split infiles
+	connectionFile, associationTextFile = infiles
+
+	# Get engine
+	dbEngine = DBConnection.create('local', connectionFile, 'datasets2tools')
+
+	# Get canned analysis dataframe
+	cannedAnalysisDataframe = pd.read_table(associationTextFile)
+
+	# Annotate
+	annotatedDataframe = associationData.annotateCannedAnalysisDataframe(cannedAnalysisDataframe, dbEngine)
+
+	# Load data
+	DBConnection.uploadTable(annotatedDataframe, dbEngine, 'canned_analysis', index=False)
 
 	# Write report
 	writeReport(outfile)

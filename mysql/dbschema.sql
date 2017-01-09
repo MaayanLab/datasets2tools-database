@@ -16,7 +16,7 @@ DROP TABLE IF EXISTS `dataset`;
 CREATE TABLE `dataset` (
 	# Fields
 	`id` INT AUTO_INCREMENT PRIMARY KEY,
-	`accession` VARCHAR(30) NOT NULL
+	`dataset_accession` VARCHAR(30) UNIQUE NOT NULL
 );
 
 ##############################
@@ -27,9 +27,9 @@ DROP TABLE IF EXISTS `tool`;
 CREATE TABLE `tool` (
 	# Fields
 	`id` INT AUTO_INCREMENT PRIMARY KEY,
-	`tool_name` VARCHAR(30) NOT NULL,
+	`tool_name` VARCHAR(30) UNIQUE NOT NULL,
 	`tool_icon_url` VARCHAR(100) NOT NULL,
-	`tool_homepage_url` VARCHAR(100) NOT NULL,
+	`tool_homepage_url` TEXT NOT NULL,
 	`doi` VARCHAR(50),
 	`tool_description` TEXT
 );

@@ -8,14 +8,16 @@
 ########## 1. Load libraries
 #############################################
 ##### 1. Python modules #####
-import sqlalchemy, json, os
+import sqlalchemy, json, os, sys
 import pandas as pd
 
 ##### 2. Custom modules #####
+sys.path.append('pipeline/scripts')
+import DBConnection
 
 #######################################################
 #######################################################
-########## S1. Get dataframes
+########## S1. Tool dataframes
 #######################################################
 #######################################################
 
@@ -69,6 +71,51 @@ def mergeToolDataframes(toolListDataframe, toolCategoryDataframe):
 
 	# Return dataframe
 	return mergedToolDataframeSubset
+
+
+#######################################################
+#######################################################
+########## S2. Dataset Dataframes
+#######################################################
+#######################################################
+
+#############################################
+########## 2.1 Dataset dataframe
+#############################################
+
+def getDatasetDataframe(associationTextFile):
+
+	# Read association dataframe
+	associationDataframe = pd.read_table(associationTextFile)
+
+	# Get tool dataframe
+
+#######################################################
+#######################################################
+########## S3. Annotation
+#######################################################
+#######################################################
+
+#############################################
+########## 3.1 Annotate dataframe
+#############################################
+
+def annotateCannedAnalysisDataframe(cannedAnalysisDataframe, dbEngine):
+
+	# Get tool dataframe
+	toolDataframe = DBConnection.executeQuery('SELECT id AS tool_fk, tool_name FROM tool', dbEngine)
+	
+	# Get dataset dataframe
+	datasetDataframe = DBConnection.executeQuery('SELECT id AS dataset_fk, dataset_accession FROM dataset', dbEngine)
+
+	# Merge
+	annotatedDataframe = cannedAnalysisDataframe.merge(toolDataframe, on='tool_name', how='left').merge(datasetDataframe, on='dataset_accession', how='left')
+
+	# Drop columns
+	annotatedDataframe.drop(['tool_name', 'dataset_accession', 'canned_analysis_description'], 1, inplace=True)
+
+	# Return
+	return annotatedDataframe
 
 
 #######################################################

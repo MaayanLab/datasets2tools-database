@@ -30,7 +30,7 @@ nDatasets = 100
 def DBgetDatasetTable(engine):
 
 	# Get Query String
-	queryString = ''' SELECT id, accession
+	queryString = ''' SELECT id, accession AS dataset_accession
 						FROM dataset
 						WHERE record_type='geo' AND id < %(nDatasets)s ''' % globals()
 
