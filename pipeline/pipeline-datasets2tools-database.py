@@ -51,15 +51,14 @@ def createDatasets2toolsDatabase(infiles, outfile):
 	connectionFile, sqlFile = infiles
 
 	# Get connection
-	dbEngine = DBConnection.create('local', connectionFile)
+	dbEngine = DBConnection.create('phpmyadmin', connectionFile)
 
 	# Create and use new database
 	DBConnection.executeCommand('DROP DATABASE IF EXISTS %(dbname)s' % globals(), dbEngine)
 	DBConnection.executeCommand('CREATE DATABASE %(dbname)s' % globals(), dbEngine)
-	DBConnection.executeCommand('USE %(dbname)s' % globals(), dbEngine)
 
 	# Update connection
-	dbEngine = DBConnection.create('local', connectionFile, dbname)
+	dbEngine = DBConnection.create('phpmyadmin', connectionFile, dbname)
 
 	# Read SQL file
 	with open(sqlFile, 'r') as openfile:
@@ -80,7 +79,7 @@ def createDatasets2toolsDatabase(infiles, outfile):
 #######################################################
 #######################################################
 ########## S2. Euclid Data
-#######################################################
+####################################################### i think you're crazy, maybe.
 #######################################################
 
 #############################################
@@ -95,7 +94,7 @@ def createDatasets2toolsDatabase(infiles, outfile):
 def migrateEuclidData(infile, outfile):
 
 	# Create engines
-	amazonEngine = DBConnection.create('local', infile, 'datasets2tools')#DBConnection.create('amazon', infile)
+	dbEngine = DBConnection.create('phpmyadmin', infile, 'datasets2tools')
 	localEngine = DBConnection.create('local', infile, 'euclid')
 
 	# Get euclid data
@@ -105,7 +104,7 @@ def migrateEuclidData(infile, outfile):
 	for tableKey in euclidDataDict.keys():
 
 		# Upload table
-		DBConnection.uploadTable(euclidDataDict[tableKey], amazonEngine, tableKey, index=False, index_label='id')
+		DBConnection.uploadTable(euclidDataDict[tableKey], dbEngine, tableKey, index=False, index_label='id')
 
 	# Set foreign key checks
 	# euclid.setForeignKeys(localEngine)

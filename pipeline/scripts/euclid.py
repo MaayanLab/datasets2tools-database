@@ -15,7 +15,7 @@ import pandas as pd
 sys.path.append('.')
 import DBConnection
 
-nDatasets = 100
+nDatasets = 6000
 
 #######################################################
 #######################################################
@@ -108,7 +108,7 @@ def getCannedAnalysisTable(engine):
 					            ON gs.id = sf.gene_signature_fk
 									LEFT JOIN dataset d
 									ON d.id = sf.dataset_fk
-						WHERE d.record_type='geo' AND d.id < %(nDatasets)s ''' % globals()
+						WHERE d.record_type='geo' AND d.id < %(nDatasets)s AND tal.link IS NOT NULL''' % globals()
 
 	# Return Dataframe
 	return DBConnection.executeQuery(queryString, engine).set_index('id')
@@ -151,7 +151,7 @@ def getRequiredMetadataTable(engine):
 def getOptionalMetadataTable(engine):
 
 	# Get Query String
-	queryString = ''' SELECT tal.id as canned_analysis_fk, om.name AS variable, om.value FROM target_app_link tal
+	queryString = ''' SELECT tal.id as canned_analysis_fk, om.name AS variable, SUBSTR(om.value, 1, 100) AS value FROM target_app_link tal
 						LEFT JOIN gene_list gl
 					    ON gl.id = tal.gene_list_fk
 							LEFT JOIN gene_signature gs
@@ -162,7 +162,10 @@ def getOptionalMetadataTable(engine):
 									ON d.id = sf.dataset_fk
 										LEFT JOIN optional_metadata om
 							            ON gs.id = om.gene_signature_fk
-						WHERE om.name IS NOT NULL AND om.value IS NOT NULL AND d.record_type='geo' AND d.id < %(nDatasets)s ''' % globals()
+						WHERE om.name IS NOT NULL AND
+							  om.value IS NOT NULL AND
+							  d.record_type='geo' AND
+							  d.id < %(nDatasets)s ''' % globals()
 
 	# Return Dataframe
 	optional_metadata_dataframe = DBConnection.executeQuery(queryString, engine)
