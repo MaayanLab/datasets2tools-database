@@ -62,7 +62,7 @@ def getToolTable(engine):
 					'tool_description': 'An ultra-fast LINCS L1000 Characteristic Direction signature search engine.'},
 				'paea': {
 					'name': 'PAEA',
-					'tool_icon_url': 'http://lincsproject.org/LINCS/files/tools_logos/paea.png',
+					'tool_icon_url': 'http://labs.icahn.mssm.edu/maayanlab/wp-content/uploads/sites/75/2014/10/paea.png',
 					'tool_homepage_url':'http://amp.pharm.mssm.edu/PAEA',
 					'publication_url': 'http://www.ncbi.nlm.nih.gov/pubmed/26848405',
 					'tool_description': 'Enrichment analysis tool implementing the principal angle method.'},

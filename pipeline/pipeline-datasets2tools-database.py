@@ -143,7 +143,7 @@ def loadAssociationTools(infiles, outfile):
 	mergedToolDataframeSubset = associationData.mergeToolDataframes(toolListDataframe, toolCategoryDataframe)
 
 	# Get engine
-	dbEngine = DBConnection.create('local', connectionFile, 'datasets2tools')
+	dbEngine = DBConnection.create('phpmyadmin', connectionFile, 'datasets2tools')
 
 	# Get names of existing tools
 	existingTools = DBConnection.executeQuery('select tool_name from tool', dbEngine).tool_name.tolist()
@@ -176,7 +176,7 @@ def loadAssociationDatasets(infiles, outfile):
 	connectionFile, associationTextFile = infiles
 
 	# Get engine
-	dbEngine = DBConnection.create('local', connectionFile, 'datasets2tools')
+	dbEngine = DBConnection.create('phpmyadmin', connectionFile, 'datasets2tools')
 
 	# Get dataframe
 	datasetDataframe = pd.read_table(associationTextFile)['dataset_accession'].drop_duplicates()
@@ -204,7 +204,7 @@ def loadDatasetToolAssociations(infiles, outfile):
 	connectionFile, associationTextFile = infiles
 
 	# Get engine
-	dbEngine = DBConnection.create('local', connectionFile, 'datasets2tools')
+	dbEngine = DBConnection.create('phpmyadmin', connectionFile, 'datasets2tools')
 
 	# Get canned analysis dataframe
 	cannedAnalysisDataframe = pd.read_table(associationTextFile)
