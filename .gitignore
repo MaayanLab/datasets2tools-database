@@ -6,3 +6,4 @@ mysql/dbconnection.json
 reports
 data
 *.ipynb
+*.dir

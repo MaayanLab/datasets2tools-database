@@ -1,6 +1,6 @@
 #################################################################
 #################################################################
-############### DBConnection Functions ##########################
+############### dbConnection Functions ##########################
 #################################################################
 #################################################################
 
@@ -13,7 +13,7 @@ import pandas as pd
 
 ##### 2. Custom modules #####
 sys.path.append('pipeline/scripts')
-import DBConnection
+import dbConnection
 
 #######################################################
 #######################################################
@@ -83,13 +83,6 @@ def mergeToolDataframes(toolListDataframe, toolCategoryDataframe):
 ########## 2.1 Dataset dataframe
 #############################################
 
-def getDatasetDataframe(associationTextFile):
-
-	# Read association dataframe
-	associationDataframe = pd.read_table(associationTextFile)
-
-	# Get tool dataframe
-
 #######################################################
 #######################################################
 ########## S3. Annotation
@@ -103,10 +96,10 @@ def getDatasetDataframe(associationTextFile):
 def annotateCannedAnalysisDataframe(cannedAnalysisDataframe, dbEngine):
 
 	# Get tool dataframe
-	toolDataframe = DBConnection.executeQuery('SELECT id AS tool_fk, tool_name FROM tool', dbEngine)
+	toolDataframe = dbConnection.executeQuery('SELECT id AS tool_fk, tool_name FROM tool', dbEngine)
 	
 	# Get dataset dataframe
-	datasetDataframe = DBConnection.executeQuery('SELECT id AS dataset_fk, dataset_accession FROM dataset', dbEngine)
+	datasetDataframe = dbConnection.executeQuery('SELECT id AS dataset_fk, dataset_accession FROM dataset', dbEngine)
 
 	# Merge
 	annotatedDataframe = cannedAnalysisDataframe.merge(toolDataframe, on='tool_name', how='left').merge(datasetDataframe, on='dataset_accession', how='left')

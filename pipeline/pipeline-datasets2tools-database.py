@@ -18,13 +18,15 @@ import pandas as pd
 ##### 2. Custom modules #####
 # Pipeline running
 sys.path.append('pipeline/scripts')
-import DBConnection, euclid, associationData
+import dbConnection, euclid, associationData, dataSubmissionAPI
 
 #############################################
 ########## 2. General setup
 #############################################
 ##### 1. Default variables #####
-dbname = 'datasets2tools'
+dbConnectionFile = 'mysql/dbconnection.json'
+dbSchemaFile = 'mysql/dbschema.sql'
+associationsFile = 'f1-associations.dir/dataset_tool_associations.xlsx'
 
 ##### 2. Functions #####
 ### 2.1 Write report
@@ -39,26 +41,26 @@ def writeReport(outfile):
 #######################################################
 #######################################################
 
-@follows(mkdir('reports'))
+@follows(mkdir('f2-upload_reports.dir'))
 
-@files(['mysql/dbconnection.json',
-	    'mysql/dbschema.sql'],
-	   'reports/01-dbschema.txt')
+@files([dbConnectionFile,
+	    dbSchemaFile],
+	   'f2-upload_reports.dir/01-db_creation.txt')
 
 def createDatasets2toolsDatabase(infiles, outfile):
 
 	# Split infiles
-	connectionFile, sqlFile = infiles
+	dbConnectionFile, sqlFile = infiles
 
 	# Get connection
-	dbEngine = DBConnection.create('phpmyadmin', connectionFile)
+	dbEngine = dbConnection.create('phpmyadmin', dbConnectionFile)
 
 	# Create and use new database
-	DBConnection.executeCommand('DROP DATABASE IF EXISTS %(dbname)s' % globals(), dbEngine)
-	DBConnection.executeCommand('CREATE DATABASE %(dbname)s' % globals(), dbEngine)
+	dbConnection.executeCommand('DROP DATABASE IF EXISTS datasets2tools' % globals(), dbEngine)
+	dbConnection.executeCommand('CREATE DATABASE datasets2tools' % globals(), dbEngine)
 
 	# Update connection
-	dbEngine = DBConnection.create('phpmyadmin', connectionFile, dbname)
+	dbEngine = dbConnection.create('phpmyadmin', dbConnectionFile, 'datasets2tools')
 
 	# Read SQL file
 	with open(sqlFile, 'r') as openfile:
@@ -71,163 +73,222 @@ def createDatasets2toolsDatabase(infiles, outfile):
 	for sqlCommand in sqlCommandList:
 
 		# Execute command
-		DBConnection.executeCommand(sqlCommand, dbEngine)
+		dbConnection.executeCommand(sqlCommand, dbEngine)
 
 	# Write report
 	writeReport(outfile)
 
 #######################################################
 #######################################################
-########## S2. Euclid Data
-####################################################### i think you're crazy, maybe.
+########## S2. Get Euclid Data
+#######################################################
 #######################################################
 
 #############################################
-########## 1. Euclid Data
+########## 1. Get canned analyses
 #############################################
 
-@follows(createDatasets2toolsDatabase)
+@follows(mkdir('f3-euclid.dir/dump.dir'), createDatasets2toolsDatabase)
 
-@files('mysql/dbconnection.json',
-	   'reports/02-euclid.txt')
+@files(dbConnectionFile,
+	   'f3-euclid.dir/dump.dir/euclid-canned_analysis_table.txt')
 
-def migrateEuclidData(infile, outfile):
+def getEuclidCannedAnalyses(infile, outfile):
 
-	# Create engines
-	dbEngine = DBConnection.create('phpmyadmin', infile, 'datasets2tools')
-	localEngine = DBConnection.create('local', infile, 'euclid')
+	# Get engine
+	dbEngine = dbConnection.create('phpmyadmin', infile, 'euclid')
 
 	# Get euclid data
-	euclidDataDict = euclid.getData(localEngine)
+	euclidData = euclid.getCannedAnalysisDataframe(dbEngine)
 
-	# Loop through tables
-	for tableKey in euclidDataDict.keys():
+	# Save
+	euclidData.to_csv(outfile, sep='\t', index=True, index_label='index')
 
-		# Upload table
-		DBConnection.uploadTable(euclidDataDict[tableKey], dbEngine, tableKey, index=False, index_label='id')
+#############################################
+########## 2. Get canned analysis metadata
+#############################################
 
-	# Set foreign key checks
-	# euclid.setForeignKeys(localEngine)
+@follows(getEuclidCannedAnalyses)
 
-	# Write report
-	writeReport(outfile)
+@files(dbConnectionFile,
+	   'f3-euclid.dir/dump.dir/euclid-canned_analysis_metadata_table.txt')
+
+def getEuclidMetadata(infile, outfile):
+
+	# Get engine
+	dbEngine = dbConnection.create('phpmyadmin', infile, 'euclid')
+
+	# Get euclid data
+	euclidMetadata = euclid.getMetadataDataframe(dbEngine)
+
+	# Save
+	euclidMetadata.to_csv(outfile, sep='\t', index=False)
+
+#############################################
+########## 3. Process metadata dataframe
+#############################################
+
+@follows(mkdir('f3-euclid.dir/processed.dir'))
+
+@transform(getEuclidMetadata,
+		   suffix('.txt'),
+		   add_inputs(getEuclidCannedAnalyses),
+		   '_processed.txt')
+
+def processEuclidMetadata(infiles, outfile):
+
+	# Split infiles
+	metadataFile, cannedAnalysisFile = infiles
+
+	# Read canned analysis metadata
+	cannedAnalysisMetadataDataframe = pd.read_table(metadataFile)
+
+	# Read canned analysis table
+	cannedAnalysisDataframe = pd.read_table(cannedAnalysisFile)
+
+	# Merge dataframes
+	mergedDataframe = cannedAnalysisDataframe.merge(cannedAnalysisMetadataDataframe, on='gene_list_id', how='left')
+
+	# Create metadata dictionary
+	metadataDict = {x:{'tool_name': y} for x, y in mergedDataframe[['index','tool_name']].drop_duplicates().as_matrix()}
+
+	# Add metadata
+	for index, variable, value in mergedDataframe[['index', 'variable', 'value']].as_matrix():
+
+		# Add values
+		metadataDict[index][variable] = value
+
+	# Get processed metadata dataframe
+	processedMetadataDataframe = mergedDataframe.loc[:, ['index','variable','value']]
+
+	# Create description list
+	descriptionList = [[x, 'description', euclid.getCannedAnalysisDescription(metadataDict[x])] for x in metadataDict.keys()]
+
+	# Convert to dataframe
+	descriptionDataframe = pd.DataFrame(descriptionList, columns=['index','variable','value'])
+
+	# Add to metadata dataframe
+	processedMetadataDataframe = pd.concat([processedMetadataDataframe, descriptionDataframe]).sort_values(by='index')
+
+	# Save result
+	processedMetadataDataframe.to_csv(outfile, sep='\t', index=False)
+
 
 #######################################################
 #######################################################
-########## S2. Association Data
+########## S3. Load Data
 #######################################################
 #######################################################
 
 #############################################
-########## 2.1 Load Tools
+########## 1. Load Tools
 #############################################
 
-@follows(migrateEuclidData)
+@follows(getEuclidMetadata)
 
-@files(['mysql/dbconnection.json',
-		'data/dataset_tool_associations.xlsx'],
-		'reports/03-association_tools.txt')
+@files([dbConnectionFile,
+		associationsFile],
+		'f2-upload_reports.dir/02-tools.txt')
 
 def loadAssociationTools(infiles, outfile):
 
 	# Split infiles
-	connectionFile, associationFile = infiles
+	dbConnectionFile, associationsFile = infiles
+
+	# Get engine
+	dbEngine = dbConnection.create('phpmyadmin', dbConnectionFile, 'datasets2tools')
 
 	# Get tool list dataframe
-	toolListDataframe = associationData.getToolListDataframe(associationFile)
+	toolListDataframe = associationData.getToolListDataframe(associationsFile)
 
 	# Get tool category dataframe
-	toolCategoryDataframe = associationData.getToolCategoryDataframe(associationFile)
+	toolCategoryDataframe = associationData.getToolCategoryDataframe(associationsFile)
 
 	# Merge dataframes
 	mergedToolDataframeSubset = associationData.mergeToolDataframes(toolListDataframe, toolCategoryDataframe)
 
-	# Get engine
-	dbEngine = DBConnection.create('phpmyadmin', connectionFile, 'datasets2tools')
-
-	# Get names of existing tools
-	existingTools = DBConnection.executeQuery('select tool_name from tool', dbEngine).tool_name.tolist()
-
-	# Get names of tools to remove
-	toolsToRemove = set(existingTools).intersection(mergedToolDataframeSubset['tool_name'])
-
-	# Drop existing tools
-	mergedToolDataframeSubset = mergedToolDataframeSubset.set_index('tool_name', drop=False).drop(toolsToRemove)
-
 	# Upload data
-	DBConnection.uploadTable(mergedToolDataframeSubset, dbEngine, 'tool', index=False)
+	dbConnection.uploadTable(mergedToolDataframeSubset, dbEngine, 'tool', index=False)
 
 	# Write report
 	writeReport(outfile)
 
 #############################################
-########## 2.2 Load Datasets
+########## 2. Upload Canned Analyses
 #############################################
 
 @follows(loadAssociationTools)
 
-@files(['mysql/dbconnection.json',
-		'data/dataset_tool_association_table.txt'],
-		'reports/04-association_datasets.txt')
+@merge([dbConnectionFile,
+		getEuclidCannedAnalyses,
+		processEuclidMetadata],
+	   'f3-euclid.dir/processed.dir/euclid-id_conversion_table.txt')
 
-def loadAssociationDatasets(infiles, outfile):
+def loadEuclidCannedAnalyses(infiles, outfile):
 
 	# Split infiles
-	connectionFile, associationTextFile = infiles
+	dbConnectionFile, cannedAnalysisFile, cannedAnalysisMetadataFile = infiles
 
 	# Get engine
-	dbEngine = DBConnection.create('phpmyadmin', connectionFile, 'datasets2tools')
+	mysql = dbConnection.create('phpmyadmin', dbConnectionFile, 'datasets2tools')
 
-	# Get dataframe
-	datasetDataframe = pd.read_table(associationTextFile)['dataset_accession'].drop_duplicates()
+	# Load canned analysis dataframe
+	cannedAnalysisDataframe = pd.read_table(cannedAnalysisFile)
 
-	# Load data
-	DBConnection.uploadTable(datasetDataframe, dbEngine, 'dataset', index=False)
+	# Load canned analysis metadata dataframe
+	cannedAnalysisMetadataDataframe = pd.read_table(cannedAnalysisMetadataFile)
+
+	# Process dataframes
+	cannedAnalysisDataframe, cannedAnalysisMetadataDataframe = dataSubmissionAPI.processDataframes(cannedAnalysisDataframe, cannedAnalysisMetadataDataframe, 'index')
+
+	# Get matching dataset and tool IDs
+	idDict = dataSubmissionAPI.matchIds(cannedAnalysisDataframe, mysql)
+
+	# Upload canned analyses
+	print 'Loading Canned Analyses...'
+	cannedAnalysisIdDict = dataSubmissionAPI.uploadCannedAnalyses(cannedAnalysisDataframe, idDict, mysql, 'index')
+
+	# Get paired list of IDs
+	idPairList = [[x, y] for x in cannedAnalysisIdDict.keys() for y in cannedAnalysisIdDict[x]]
+
+	# Convert to dataframe
+	idPairDataframe = pd.DataFrame(idPairList, columns=['index', 'canned_analysis_fk'])
+
+	# Save file
+	idPairDataframe.to_csv(outfile, sep='\t', index=False)
+
+
+#############################################
+########## 3. Upload Analysis Metadata
+#############################################
+
+@files([dbConnectionFile,
+		loadEuclidCannedAnalyses,
+		processEuclidMetadata],
+	   'f2-upload_reports.dir/03-euclid.txt')
+
+def loadEuclidCannedAnalysisMetadata(infiles, outfile):
+
+	# Split infiles
+	dbConnectionFile, idPairFile, metadataFile = infiles
+
+	# Get engine
+	mysql = dbConnection.create('phpmyadmin', dbConnectionFile, 'datasets2tools')
+
+	# Read ID Pair dataframe
+	idPairDataframe = pd.read_table(idPairFile)
+
+	# Read metadata file
+	cannedAnalysisMetadataDataframe = pd.read_table(metadataFile)
+
+	# Merge Dataframes
+	mergedMetadataDataframe = idPairDataframe.merge(cannedAnalysisMetadataDataframe, on='index').drop_duplicates(subset=['canned_analysis_fk', 'variable'])
+
+	# Load table
+	dbConnection.insertDataframe(mergedMetadataDataframe[['canned_analysis_fk', 'variable', 'value']], 'canned_analysis_metadata', mysql)
 
 	# Write report
 	writeReport(outfile)
-
-
-#############################################
-########## 2.3 Load Associations
-#############################################
-
-@follows(loadAssociationDatasets)
-
-@files(['mysql/dbconnection.json',
-		'data/dataset_tool_association_table.txt'],
-		'reports/05-dataset_tool_associations.txt')
-
-def loadDatasetToolAssociations(infiles, outfile):
-
-	# Split infiles
-	connectionFile, associationTextFile = infiles
-
-	# Get engine
-	dbEngine = DBConnection.create('phpmyadmin', connectionFile, 'datasets2tools')
-
-	# Get canned analysis dataframe
-	cannedAnalysisDataframe = pd.read_table(associationTextFile)
-
-	# Annotate
-	annotatedDataframe = associationData.annotateCannedAnalysisDataframe(cannedAnalysisDataframe, dbEngine)
-
-	# Load data
-	DBConnection.uploadTable(annotatedDataframe, dbEngine, 'canned_analysis', index=False)
-
-	# Write report
-	writeReport(outfile)
-
-#######################################################
-#######################################################
-########## S. 
-#######################################################
-#######################################################
-
-#############################################
-########## . 
-#############################################
-
 
 
 ##################################################
@@ -235,5 +296,6 @@ def loadDatasetToolAssociations(infiles, outfile):
 ########## Run pipeline
 ##################################################
 ##################################################
+####################################################### i think you're crazy, maybe.
 pipeline_run([sys.argv[-1]], multiprocess=1, verbose=1)
 print('Done!')

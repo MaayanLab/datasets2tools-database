@@ -9,14 +9,14 @@
 #######################################################
 
 ##############################
-##### 1.1 Dataset
+##### 1.1 Datasettool
 ##############################
 
 DROP TABLE IF EXISTS `dataset`;
 CREATE TABLE `dataset` (
 	# Fields
 	`id` INT AUTO_INCREMENT PRIMARY KEY,
-	`dataset_accession` VARCHAR(30) NOT NULL
+	`dataset_accession` VARCHAR(30) NOT NULL UNIQUE
 );
 
 ##############################
@@ -44,7 +44,7 @@ CREATE TABLE `canned_analysis` (
 	`id` INT AUTO_INCREMENT PRIMARY KEY,
 	`dataset_fk` INT NOT NULL,
 	`tool_fk` INT NOT NULL,
-	`canned_analysis_url` TEXT NOT NULL
+	`canned_analysis_url` VARCHAR(150) NOT NULL UNIQUE
 );
 
 ##############################
@@ -57,5 +57,8 @@ CREATE TABLE `canned_analysis_metadata` (
 	`id` INT AUTO_INCREMENT PRIMARY KEY,
 	`canned_analysis_fk` INT NOT NULL,
 	`variable` VARCHAR(50) NOT NULL,
-	`value` LONGBLOB NOT NULL
+	`value` BLOB(300) NOT NULL,
+    
+    # Key
+    UNIQUE KEY `unique_index`(`canned_analysis_fk`, `variable`, `value`(20))
 );
