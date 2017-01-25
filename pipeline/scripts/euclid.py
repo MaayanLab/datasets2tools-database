@@ -45,7 +45,7 @@ def getCannedAnalysisDataframe(dbEngine):
 				      		  d.accession IS NOT NULL AND
 					      	  ta.name IS NOT NULL AND
 					          tal.link IS NOT NULL AND
-					          ta.name NOT IN ('clustergrammer', 'crowdsourcing') '''
+					          ta.name NOT IN ('clustergrammer', 'crowdsourcing') LIMIT 500 '''
 
 	# Perform query
 	resultDataframe = dbConnection.executeQuery(queryString, dbEngine).dropna()
@@ -146,6 +146,39 @@ def getMetadataDataframe(dbEngine):
 ########## 4. Add descriptions
 #############################################
 
+def processMetadataDataframe(cannedAnalysisDataframe, cannedAnalysisMetadataDataframe):
+
+	# Merge dataframes
+	mergedDataframe = cannedAnalysisDataframe.merge(cannedAnalysisMetadataDataframe, on='gene_list_id', how='left')
+
+	# Create metadata dictionary
+	metadataDict = {x:{'tool_name': y} for x, y in mergedDataframe[['index','tool_name']].drop_duplicates().as_matrix()}
+
+	# Add metadata
+	for index, variable, value in mergedDataframe[['index', 'variable', 'value']].as_matrix():
+
+		# Add values
+		metadataDict[index][variable] = value
+
+	# Get processed metadata dataframe
+	processedMetadataDataframe = mergedDataframe.loc[:, ['index','variable','value']]
+
+	# Create description list
+	descriptionList = [[x, 'description', getCannedAnalysisDescription(metadataDict[x])] for x in metadataDict.keys()]
+
+	# Convert to dataframe
+	descriptionDataframe = pd.DataFrame(descriptionList, columns=['index','variable','value'])
+
+	# Add to metadata dataframe
+	processedMetadataDataframe = pd.concat([processedMetadataDataframe, descriptionDataframe]).sort_values(by='index')
+
+	# Return dataframe
+	return processedMetadataDataframe	
+
+#############################################
+########## 5. Add descriptions
+#############################################
+
 def getCannedAnalysisDescription(cannedAnalysisDict):
     
     # Tool description dictionary
@@ -173,8 +206,8 @@ def getCannedAnalysisDescription(cannedAnalysisDict):
         descriptionString = toolDescriptionDict[toolName] + ' ' + str(int(float(cannedAnalysisDict['cutoff']))) + geneListDict[geneListDirection]
     
     elif 'threshold' in cannedAnalysisDict.keys():
-        
-        descriptionString = toolDescriptionDict[toolName] + geneListDict[geneListDirection] + ', p < ' + cannedAnalysisDict['threshold']
+
+        descriptionString = toolDescriptionDict[toolName] + geneListDict[geneListDirection] + ', p < ' + str(cannedAnalysisDict['threshold'])
 
     else:
         
@@ -187,7 +220,7 @@ def getCannedAnalysisDescription(cannedAnalysisDict):
         if metadataKey in relevantVariables:
         
             # Append
-            descriptionString += ', ' + cannedAnalysisDict[metadataKey] + ' ' + metadataKey
+            descriptionString += ', ' + str(cannedAnalysisDict[metadataKey]) + ' ' + str(metadataKey)
         
     return descriptionString
 
