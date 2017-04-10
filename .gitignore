@@ -1,9 +1,3 @@
-*.pyc
-project-datasets2tools-database.sublime-project
-project-datasets2tools-database.sublime-workspace
-.ruffus_history.sqlite
-mysql/dbconnection.json
-reports
-data
-*.ipynb
-*.dir
+*-checkpoint.ipynb
+*.sqlite
+f1-mysql.dir/conn.json

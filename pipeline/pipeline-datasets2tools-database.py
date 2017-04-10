@@ -18,185 +18,133 @@ import pandas as pd
 ##### 2. Custom modules #####
 # Pipeline running
 sys.path.append('pipeline/scripts')
-import dbConnection, euclid, associationData, dataSubmission
+import db
 
 #############################################
 ########## 2. General setup
 #############################################
 ##### 1. Default variables #####
-dbConnectionFile = 'mysql/dbconnection.json'
-dbSchemaFile = 'mysql/dbschema.sql'
-associationsFile = 'f1-data.dir/lincs/dataset_tool_associations.xlsx'
-dbname = 'datasets2tools1'
+# DB Files
+schemaFile = 'f1-mysql.dir/schema.sql'
+connectionFile = 'f1-mysql.dir/conn.json'
+
+# Canned Analyses
+creedsAnalyses = glob.glob('../datasets2tools-canned-analyses/f1-creeds.dir/*/*-canned_analyses.txt')
+archsAnalyses = '../datasets2tools-canned-analyses/f1-creeds.dir/archs-canned_analyses.txt'
+clustergrammerAnalyses = glob.glob('../datasets2tools-canned-analyses/f3-geo.dir/*/*/*-canned_analyses.txt')
 
 ##### 2. Functions #####
-### 2.1 Write report
-def writeReport(outfile):
-	with open(outfile, 'w') as openfile:
-		timeString = time.strftime("%Y-%m-%d, %H:%M")
-		openfile.write('Completed %(timeString)s.' % locals())
 
 #######################################################
 #######################################################
-########## S1. Database Setup
+########## S1. Create Database
 #######################################################
 #######################################################
 
 #############################################
-########## 1. Create database
+########## 1. Create Schema
 #############################################
 
-@follows(mkdir('f2-setup_reports.dir'))
+@merge(['f1-mysql.dir/schema.sql',
+		'f1-mysql.dir/conn.json'],
+		'f1-mysql.dir/schema.load')
 
-@files(dbSchemaFile,
-	   'f2-setup_reports.dir/01-db_creation.txt')
-
-def createDatasets2toolsDatabase(infile, outfile):
-
-	# Get connection
-	dbEngine = dbConnection.create('phpmyadmin', dbConnectionFile)
-
-	# Create and use new database
-	# dbConnection.executeCommand('DROP DATABASE IF EXISTS datasets2tools' % globals(), dbEngine)
-	dbConnection.executeCommand('CREATE DATABASE %(dbname)s' % globals(), dbEngine)
-
-	# Read SQL file
-	with open(infile, 'r') as openfile:
-		sqlCommandString = openfile.read()
-
-	# Get commands
-	sqlCommandList = [x for x in sqlCommandString.split(';') if x != '\n']
-
-	# Update connection
-	dbEngine = dbConnection.create('phpmyadmin', dbConnectionFile, dbname)
-
-	# Loop through commands
-	for sqlCommand in sqlCommandList:
-
-		# Execute command
-		dbConnection.executeCommand(sqlCommand, dbEngine)
-
-	# Write report
-	writeReport(outfile)
-
-#############################################
-########## 2. Load tools
-#############################################
-
-@follows(createDatasets2toolsDatabase)
-
-@files(associationsFile,
-	   'f2-setup_reports.dir/02-tools.txt')
-
-def loadAssociationTools(infile, outfile):
-
-	# Get engine
-	dbEngine = dbConnection.create('phpmyadmin', dbConnectionFile, dbname)
-
-	# Get tool list dataframe
-	toolListDataframe = associationData.getToolListDataframe(infile)
-
-	# Get tool category dataframe
-	toolCategoryDataframe = associationData.getToolCategoryDataframe(infile)
-
-	# Merge dataframes
-	mergedToolDataframeSubset = associationData.mergeToolDataframes(toolListDataframe, toolCategoryDataframe)
-
-	# Upload data
-	dbConnection.uploadTable(mergedToolDataframeSubset, dbEngine, 'tool', index=False)
-
-	# Write report
-	writeReport(outfile)
-
-#######################################################
-#######################################################
-########## S2. Get Euclid Data
-#######################################################
-#######################################################
-
-#############################################
-########## 1. Get canned analyses
-#############################################
-
-@follows(mkdir('f1-data.dir/euclid'))
-
-@files(None,
-	   'f1-data.dir/euclid/euclid-canned_analysis_table.txt')
-
-def getEuclidCannedAnalyses(infile, outfile):
-
-	# Get engine
-	dbEngine = dbConnection.create('phpmyadmin', dbConnectionFile, 'euclid')
-
-	# Get euclid data
-	euclidData = euclid.getCannedAnalysisDataframe(dbEngine)
-
-	# Save
-	euclidData.to_csv(outfile, sep='\t', index=True, index_label='index')
-
-#############################################
-########## 2. Get canned analysis metadata
-#############################################
-
-@files(getEuclidCannedAnalyses,
-	   'f1-data.dir/euclid/euclid-canned_analysis_metadata_table.txt')
-
-def getEuclidMetadata(infile, outfile):
-
-	# Read canned analysis table
-	cannedAnalysisDataframe = pd.read_table(infile)
-
-	# Get engine
-	dbEngine = dbConnection.create('phpmyadmin', dbConnectionFile, 'euclid')
-
-	# Get euclid data
-	cannedAnalysisMetadataDataframe = euclid.getMetadataDataframe(dbEngine)
-
-	# Process metadata dataframe
-	processedMetadataDataframe = euclid.processMetadataDataframe(cannedAnalysisDataframe, cannedAnalysisMetadataDataframe)
-
-	# Save result
-	processedMetadataDataframe.to_csv(outfile, sep='\t', index=False)
-
-#######################################################
-#######################################################
-########## S3. Load Data
-#######################################################
-#######################################################
-
-#############################################
-########## 1. Load data
-#############################################
-
-@follows(mkdir('f3-load_reports.dir'))
-
-@collate(glob.glob('f1-data.dir/*/*-canned_analysis*table.txt'),
-	     regex(r'.*/(.*)-canned_analysis.*table.txt'),
-	     r'f3-load_reports.dir/\1.txt')
-
-def loadCannedAnalysisData(infiles, outfile):
+def createDatabase(infiles, outfile):
 
 	# Split infiles
-	cannedAnalysisMetadataFile, cannedAnalysisFile = infiles
+	schemaFile, connectionFile = infiles
 
-	# Read dataframes
-	cannedAnalysisDataframe = pd.read_table(cannedAnalysisFile)
-	cannedAnalysisMetadataDataframe = pd.read_table(cannedAnalysisMetadataFile)
+	# Get dict
+	host, username, password = db.connect(connectionFile, 'localhost', returnData=True)
 
-	# Create database engine
-	dbEngine = dbConnection.create('phpmyadmin', dbConnectionFile, dbname)
+	# Get command
+	commandString = ''' mysql --user='%(username)s' --password='%(password)s' < %(schemaFile)s; touch %(outfile)s; ''' % locals()
 
-	# Load data
-	dataSubmission.loadCannedAnalysisData(cannedAnalysisDataframe, cannedAnalysisMetadataDataframe, dbEngine)
+	# Run
+	os.system(commandString)
 
-	# Write report
-	writeReport(outfile)
+
+#######################################################
+#######################################################
+########## S2. Load Tools
+#######################################################
+#######################################################
+
+#############################################
+########## 1. Load Tools
+#############################################
+
+@follows(createDatabase)
+
+@transform('f2-tools.dir/lincs_tools_mar152017.xlsx',
+		   suffix('.xlsx'),
+		   add_inputs(connectionFile),
+		   '.load')
+
+def loadTools(infiles, outfile):
+
+	# Split files
+	toolFile, connectionFile = infiles
+
+	# Read table
+	toolDataframe = pd.read_excel(toolFile)
+
+	# Rename dict
+	renameDict = {'name < 20 characters including spaces': 'tool_name',
+	              'icon_url': 'tool_icon_url',
+	              'url': 'tool_homepage_url',
+	              'description < 80 charcaters including spaces': 'tool_description'}
+
+	# Rename
+	toolDataframe = toolDataframe.rename(columns=renameDict)
+
+	# Select columns
+	selectedColumns = ['id', 'tool_name', 'tool_icon_url', 'tool_homepage_url', 'tool_description']
+
+	# Get engine
+	engine = db.connect(connectionFile, 'localhost', 'datasets2tools')
+
+	# Truncate
+	engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE tool; SET FOREIGN_KEY_CHECKS = 1;')
+
+	# Send to SQL
+	toolDataframe[selectedColumns].to_sql('tool', engine, if_exists='append', index=False)
+
+	# Outfile
+	os.system('touch %(outfile)s' % locals())
+
+
+#######################################################
+#######################################################
+########## S2. Load Canned Analyses
+#######################################################
+#######################################################
+
+#############################################
+########## 1. Create Links
+#############################################
+
+# @follows(mkdir('f3-analyses.dir'))
+
+
+
+
+
+#######################################################
+#######################################################
+########## S. 
+#######################################################
+#######################################################
+
+#############################################
+########## . 
+#############################################
 
 ##################################################
 ##################################################
 ########## Run pipeline
 ##################################################
 ##################################################
-####################################################### i think you're crazy, maybe.
+#######################################################
 pipeline_run([sys.argv[-1]], multiprocess=1, verbose=1)
 print('Done!')
