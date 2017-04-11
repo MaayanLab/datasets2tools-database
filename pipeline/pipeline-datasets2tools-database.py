@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #################################################################
 #################################################################
 ############### Datasets2Tools Database Pipeline ################
@@ -12,8 +13,9 @@
 #############################################
 ##### 1. Python modules #####
 from ruffus import *
-import glob, sys, os, time
+import glob, sys, os, time, json
 import pandas as pd
+import numpy as np
 from bs4 import BeautifulSoup
 
 ##### 2. Custom modules #####
@@ -163,6 +165,8 @@ def makeRepositoryTable(infiles, outfile):
 ########## 2. Load Repositories
 #############################################
 
+@follows(loadTools)
+
 @transform('f3-repositories.dir/repositories.xlsx',
 		   suffix('.xlsx'),
 		   add_inputs(connectionFile),
@@ -174,13 +178,13 @@ def loadRepositories(infiles, outfile):
 	toolFile, connectionFile = infiles
 
 	# Read table
-	repositoryDataframe = pd.read_excel(toolFile)
+	repositoryDataframe = pd.read_excel(toolFile, encoding='ascii')
 
 	# Get engine
 	engine = db.connect(connectionFile, 'localhost', 'datasets2tools')
 
 	# Truncate
-	engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE tool; SET FOREIGN_KEY_CHECKS = 1;')
+	engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE repository; SET FOREIGN_KEY_CHECKS = 1;')
 
 	# Send to SQL
 	repositoryDataframe.to_sql('repository', engine, if_exists='append', index=False)
@@ -191,49 +195,112 @@ def loadRepositories(infiles, outfile):
 
 #######################################################
 #######################################################
-########## S4. Load Datasets
+########## S4. Load Analyses
 #######################################################
 #######################################################
 
 #############################################
-########## 1. Create Dataset Table
+########## 1. Load Analyses
 #############################################
 
-@follows(mkdir('f4-datasets.dir'))
+@follows(loadRepositories)
 
-@merge(creedsAnalyses,
-	   'f4-datasets.dir/datasets.txt')
+@follows(mkdir('f4-analyses.dir'))
 
-def makeDatasetTable(infiles, outfile):
+def loadJobs():
+	infiles = creedsAnalyses
+	for analysisFile in infiles:
+		outDir = os.path.join('f4-analyses.dir', os.path.basename(analysisFile)[:-len('-canned_analyses.txt')])
+		if not os.path.exists(outDir):
+			os.makedirs(outDir)
+		outfiles = [os.path.join(outDir, '-'.join([os.path.basename(outDir), x])) for x in ['datasets.txt', 'canned_analyses.txt', 'canned_analysis_metadata.txt', 'terms.txt', 'all.load']]
+		yield [[analysisFile, connectionFile], outfiles]
 
-	# Get dataset accessions
-	datasetAccessions = set([y for x in infiles for y in pd.read_table(x)['geo_id']])
+@files(loadJobs)
 
-	# Make annotation dataframe
-	datasetAnnotationDataframe = pd.DataFrame({x: db.annotate(x) for x in datasetAccessions}).T.rename(columns={'title': 'dataset_title', 'summary': 'dataset_description', 'gdsType': 'dataset_type'})
+def loadAnalyses(infiles, outfiles):
 
-	# Encode
-	for col in ['dataset_title', 'dataset_description']:
-		datasetAnnotationDataframe[col] = [x.encode('utf-8') for x in datasetAnnotationDataframe[col]]
+	# Split files
+	analysisFile, connectionFile = infiles
+	datasetOutfile, analysisOutfile, metadataOutfile, termOutfile, loadOutfile = outfiles
 
-	# Add repository
+	# Connect
+	engine = db.connect(connectionFile, 'localhost', 'datasets2tools')
+	connection = engine.connect()
+	transaction = connection.begin()
+
+	# Read dataframes
+	inputAnalysisDataframe = pd.read_table(analysisFile, index_col='index').dropna().rename(columns={'geo_id': 'dataset_accession', 'link': 'canned_analysis_url'})
+	toolDataframe = pd.read_sql_query('SELECT id AS tool_fk, LCASE(tool_name) AS tool_name FROM tool', engine)
+	datasetDataframe = pd.read_sql_query('SELECT id AS dataset_fk, LCASE(dataset_accession) AS dataset_accession FROM dataset', engine)
+	repositoryDataframe = pd.read_sql_query('SELECT id AS repository_fk, LCASE(repository_name) AS repository_name FROM repository', engine)
+	termDataframe = pd.read_sql_query('SELECT id AS term_fk, LCASE(term_name) AS term_name FROM term', engine)
+	repositoryDataframe['repository_name'] = [x.replace('\xc2\xa0', ' ') for x in repositoryDataframe['repository_name']]
+
+	# Annotate analysis dataframe
+	annotatedDataframe = inputAnalysisDataframe.merge(toolDataframe, left_on='tool', right_on='tool_name', how='left').merge(datasetDataframe, left_on='dataset_accession', right_on='dataset_accession', how='left')
+
+	# Set error if tool not available
+	if annotatedDataframe['tool_fk'].isnull().any():
+	    raise ValueError('Tool(s) '+', '.join(annotatedDataframe.ix[annotatedDataframe['tool_fk'].isnull(), 'tool_fk']).unique+'not in database!')
+
+	# Add new datasets
+	# engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE dataset;')
+	datasetsToUpload = annotatedDataframe.loc[[np.isnan(x) for x in annotatedDataframe['dataset_fk']], 'dataset_accession'].unique()
+	if len(datasetsToUpload) > 0:
+		newDatasetDataframe = pd.DataFrame({x: db.annotate(x) for x in datasetsToUpload}).T.reset_index().rename(columns={'title': 'dataset_title', 'summary': 'dataset_description', 'index': 'dataset_accession'})[['dataset_accession', 'repository_name', 'dataset_title', 'dataset_description', 'dataset_landing_url']]
+		newDatasetDataframe = db.insertData(newDatasetDataframe.merge(repositoryDataframe, on='repository_name', how='left').drop('repository_name', axis=1), 'dataset', connection)
+		datasetIdDict = {rowData['dataset_accession']:rowData['id'] for index, rowData in newDatasetDataframe.iterrows()}
+		for dataset in datasetsToUpload:
+		    annotatedDataframe.loc[annotatedDataframe['dataset_accession'] == dataset, 'dataset_fk'] = datasetIdDict[dataset]
+
+	# Add new analyses
+	# engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE canned_analysis;')
+	analysisDataframe = db.insertData(annotatedDataframe[['dataset_fk', 'tool_fk', 'canned_analysis_url']], 'canned_analysis', connection)
+	analysisIdDict = {index:rowData['id'] for index, rowData in analysisDataframe.iterrows()}
+
+	# Create metadata dataframe
+	annotatedDataframe['metadata'] = [json.loads(x) for x in annotatedDataframe['metadata']]
+	metadataDataframe = pd.DataFrame([{'canned_analysis_fk': analysisIdDict[index], 'term_name': variable, 'value': value} for index, metadataDict in annotatedDataframe['metadata'].iteritems() for variable, value in metadataDict.iteritems()])
+	metadataDataframe['term_name'] = [x.lower() for x in metadataDataframe['term_name']]
+	metadataDataframe = metadataDataframe.merge(termDataframe, on='term_name', how='left')
+
+	# Add new terms
+	# engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE term;')
+	termsToUpload = metadataDataframe.loc[[np.isnan(x) for x in metadataDataframe['term_fk']], 'term_name'].unique()
+	if len(termsToUpload) > 0:
+		newTermDataframe = db.insertData(pd.DataFrame([[term, ''] for term in termsToUpload], columns=['term_name', 'term_description']), 'term', connection)
+		termIdDict = {rowData['term_name']:rowData['id'] for index, rowData in newTermDataframe.iterrows()}
+		for term in termsToUpload:
+		    metadataDataframe.loc[metadataDataframe['term_name'] == term, 'term_fk'] = termIdDict[term]
+	metadataDataframe = metadataDataframe[['canned_analysis_fk', 'term_fk', 'value']]
 
 	# Save
-	datasetAnnotationDataframe.to_csv(outfile, sep='\t', index_label='geo_accession')
-
-#############################################
-########## 2. Load Data
-#############################################
-
-@subdivide(makeDatasetTable,
-		   formatter(),
-		   'f4-datasets.dir/dataset*.txt',
-		   'f4-datasets.dir/dataset')
-
-def uploadDatasets(infile, outfiles, outfileRoot):
-
-	pass
-
+	if len(datasetsToUpload) > 0:
+		newDatasetDataframe.iloc[:,[5, 0, 4, 3, 1, 2]].to_csv(datasetOutfile, sep='\t', index=False)
+		os.system('touch '+datasetOutfile)
+	analysisDataframe.iloc[:, [3, 0, 1, 2]].to_csv(analysisOutfile, sep='\t', index=False)
+	metadataDataframe.iloc[:, [0, 2, 1]].to_csv(metadataOutfile, sep='\t', index=False)
+	if len(termsToUpload) > 0:
+		newTermDataframe.to_csv(termOutfile, sep='\t', index=False)
+	else:
+		os.system('touch '+termOutfile)
+	                                              
+	# Confirm
+	nb = raw_input('Confirm submission for '+os.path.dirname(loadOutfile)+'? (y/n) ')
+	if nb == 'y':
+	    # Commit
+	    transaction.commit()
+	    
+	    # Add metadata
+	    metadataDataframe.to_sql('canned_analysis_metadata', engine, index=False, if_exists='append')
+	    
+	    # Outfile
+	    os.system('touch '+loadOutfile)
+	else:
+	    transaction.rollback()
+	    for outfile in [datasetOutfile, analysisOutfile, metadataOutfile, termOutfile]:
+	    	os.unlink(outfile)
 
 
 #######################################################

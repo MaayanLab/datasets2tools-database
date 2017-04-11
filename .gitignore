@@ -1,3 +1,6 @@
+*.sublime-project
+*.sublime-workspace
 *-checkpoint.ipynb
 *.sqlite
+*.dir
 f1-mysql.dir/conn.json
