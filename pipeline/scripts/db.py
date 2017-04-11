@@ -49,12 +49,6 @@ def annotate(geoAccession, attributes = ['title', 'summary', 'taxon', 'gdsType']
 
 def insertData(dataframe, tableName, connection):
     for index, rowData in dataframe.iterrows():
-    	print ''
-    	print ''
-    	print ''
-    	print ''
-    	print ''
-        print rowData.values[2]
         insertCommand = 'INSERT INTO ' + tableName + '(`' + '`, `'.join(rowData.index) + '`) VALUES ("' + '", "'.join([str(x).replace('%', '%%') for x in rowData.values]) + '");'
         connection.execute(insertCommand)
         dataframe.loc[index, 'id'] = int(connection.execute('SELECT LAST_INSERT_ID();').fetchall()[0][0])

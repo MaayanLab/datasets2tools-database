@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
 import xml.etree.ElementTree as ET
-import urllib
+import urllib, json, os, warnings, time
+
+warnings.filterwarnings("ignore")
 
 class CannedAnalysisTable:
     
@@ -25,7 +27,7 @@ class CannedAnalysisTable:
 
     def insert_dataframe(self, dataframe, tableName, connection):
         for index, rowData in dataframe.iterrows():
-            insertCommand = 'INSERT INTO ' + tableName + '(`' + '`, `'.join(rowData.index) + '`) VALUES ("' + '", "'.join([str(x).replace('%', '%%') for x in rowData.values]) + '");'
+            insertCommand = 'INSERT INTO ' + tableName + '(`' + '`, `'.join(rowData.index) + '`) VALUES ("' + '", "'.join([str(x) for x in rowData.values]) + '");'
             connection.execute(insertCommand)
             dataframe.loc[index, 'id'] = connection.execute('SELECT LAST_INSERT_ID();').fetchall()[0][0]
         dataframe['id'] = dataframe['id'].astype(int)
@@ -35,9 +37,10 @@ class CannedAnalysisTable:
         if dataset_accession[:3] in ['GDS', 'GSE']:
             geoId = ET.fromstring(urllib.urlopen('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=gds&term={dataset_accession}%5BAccession%20ID%5D'.format(**locals())).read()).findall('IdList')[0][0].text
             root = ET.fromstring(urllib.urlopen('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=gds&id={geoId}'.format(**locals())).read())
-            annotDict = {x.attrib['Name']: x.text for x in root.find('DocSum') if 'Name' in x.attrib.keys() and x.attrib['Name'] in attributes}
+            annotDict = {x.attrib['Name']: x.text.encode('ascii', 'ignore').replace('%', '%%') for x in root.find('DocSum') if 'Name' in x.attrib.keys() and x.attrib['Name'] in attributes}
             annotDict['dataset_landing_url'] = 'https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc='+dataset_accession if dataset_accession[:3] == 'GDS' else 'https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc='+dataset_accession
             annotDict['repository_name'] = 'gene expression omnibus'
+            time.sleep(1)
         else:
             annotDict = {'title': '', 'summary': '', 'repository_name': '', 'dataset_landing_url': ''}
         return annotDict
@@ -53,6 +56,7 @@ class CannedAnalysisTable:
         self.missing_datasets = self.annotated_df.loc[self.annotated_df['dataset_fk'].isnull(), 'dataset_accession'].unique()
         if len(self.missing_datasets) == 0:
             if self.verbose == 1: print 'All ' + str(len(self.annotated_df['dataset_fk'].unique())) + ' datasets in database.'
+            self.new_dataset_df = pd.DataFrame()
         else:
             if self.verbose == 1: print 'Adding missing datasets (' + str(len(self.missing_datasets)) + '/' + str(len(self.annotated_df['dataset_accession'].unique())) + '): ' + ', '.join(self.missing_datasets) + '.'
             self.new_dataset_df = pd.DataFrame({x: self.annotate_dataset(x) for x in self.missing_datasets}).T.reset_index().rename(columns={'title': 'dataset_title', 'summary': 'dataset_description', 'index': 'dataset_accession'})
@@ -65,6 +69,7 @@ class CannedAnalysisTable:
         self.missing_terms = self.metadata_df.loc[self.metadata_df['term_fk'].isnull(), 'term_name'].unique()
         if len(self.missing_terms) == 0:
             if self.verbose == 1: print 'All ' + str(len(self.metadata_df['term_fk'].unique())) + ' metadata terms in database.'
+            self.new_term_df = pd.DataFrame()
         else:
             if self.verbose == 1: print 'Adding missing metadata terms (' + str(len(self.missing_terms)) + '/' + str(len(self.metadata_df['term_name'].unique())) + '): ' + ', '.join(self.missing_terms) + '.'
             self.new_term_df = self.insert_dataframe(pd.DataFrame([[term, ''] for term in self.missing_terms], columns=['term_name', 'term_description']), 'term', self.connection)
@@ -88,7 +93,7 @@ class CannedAnalysisTable:
         self.load_analyses()
         
     def commit_transaction(self, outfiles):
-        confirm = raw_input('Commit? (y/n) ')
+        confirm = raw_input('\nCommit? (y/n) ')
         if confirm == 'y':
             self.transaction.commit()
             self.metadata_df.to_sql('canned_analysis_metadata', self.engine, index=False, if_exists='append')
@@ -100,7 +105,7 @@ class CannedAnalysisTable:
             
     def write_files(self, outfiles):
         self.new_dataset_df.to_csv(outfiles[0], sep='\t', index=False)
-        self.analysis.to_csv(outfiles[1], sep='\t', index=False)
+        self.analysis_df.to_csv(outfiles[1], sep='\t', index=False)
         self.metadata_df.to_csv(outfiles[2], sep='\t', index=False)
         self.new_term_df.to_csv(outfiles[3], sep='\t', index=False)
             

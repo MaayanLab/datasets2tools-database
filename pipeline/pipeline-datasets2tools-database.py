@@ -149,9 +149,9 @@ def makeRepositoryTable(infiles, outfile):
 	    
 	    try:
 	        # Add data
-	        resultDict[row.find('a').text.encode('utf-8')] = {'repository_icon_url': row.find('img').attrs['src'].replace('./', 'https://datamed.org/').encode('utf-8'),
-					                                          'repository_description': row.find_all('td')[-1].text.encode('utf-8'),
-					                                          'repository_homepage_url': ''}
+	        resultDict[row.find('a').text] = {'repository_icon_url': row.find('img').attrs['src'].replace('./', 'https://datamed.org/'),
+	                                          'repository_description': row.find_all('td')[-1].text,
+	                                          'repository_homepage_url': ''}
 	    except:
 	        pass
 
@@ -204,7 +204,6 @@ def loadRepositories(infiles, outfile):
 ########## 1. Load Analyses
 #############################################
 
-@follows(loadRepositories)
 
 @follows(mkdir('f4-analyses.dir'))
 
@@ -217,19 +216,22 @@ def loadJobs():
 		outfiles = [os.path.join(outDir, '-'.join([os.path.basename(outDir), x])) for x in ['datasets.txt', 'canned_analyses.txt', 'canned_analysis_metadata.txt', 'terms.txt', 'all.load']]
 		yield [[analysisFile, connectionFile], outfiles]
 
+@follows(loadRepositories)
 @files(loadJobs)
 
 def loadAnalyses(infiles, outfiles):
 
 	# Split files
 	analysisFile, connectionFile = infiles
-	datasetOutfile, analysisOutfile, metadataOutfile, termOutfile, loadOutfile = outfiles
 
 	# Read dataframe
 	inputAnalysisDataframe = pd.read_table(analysisFile, index_col='index').dropna().rename(columns={'geo_id': 'dataset_accession', 'link': 'canned_analysis_url', 'tool': 'tool_name'})
 
 	# Connect
 	engine = db.connect(connectionFile, 'localhost', 'datasets2tools')
+
+	# Print
+	print '\nFor file ' + os.path.basename(outfiles[-1][:-len('.load')]) + ':'
 
 	# Create object
 	analysisTable = CannedAnalysisTable(inputAnalysisDataframe, engine)
