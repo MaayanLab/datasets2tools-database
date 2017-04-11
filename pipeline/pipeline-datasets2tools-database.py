@@ -22,6 +22,7 @@ from bs4 import BeautifulSoup
 # Pipeline running
 sys.path.append('pipeline/scripts')
 import db
+from CannedAnalysisTable import CannedAnalysisTable
 
 #############################################
 ########## 2. General setup
@@ -224,85 +225,18 @@ def loadAnalyses(infiles, outfiles):
 	analysisFile, connectionFile = infiles
 	datasetOutfile, analysisOutfile, metadataOutfile, termOutfile, loadOutfile = outfiles
 
+	# Read dataframe
+	inputAnalysisDataframe = pd.read_table(analysisFile, index_col='index').dropna().rename(columns={'geo_id': 'dataset_accession', 'link': 'canned_analysis_url', 'tool': 'tool_name'})
+
 	# Connect
 	engine = db.connect(connectionFile, 'localhost', 'datasets2tools')
-	connection = engine.connect()
-	transaction = connection.begin()
 
-	# Read dataframes
-	inputAnalysisDataframe = pd.read_table(analysisFile, index_col='index').dropna().rename(columns={'geo_id': 'dataset_accession', 'link': 'canned_analysis_url'})
-	toolDataframe = pd.read_sql_query('SELECT id AS tool_fk, LCASE(tool_name) AS tool_name FROM tool', engine)
-	datasetDataframe = pd.read_sql_query('SELECT id AS dataset_fk, LCASE(dataset_accession) AS dataset_accession FROM dataset', engine)
-	repositoryDataframe = pd.read_sql_query('SELECT id AS repository_fk, LCASE(repository_name) AS repository_name FROM repository', engine)
-	termDataframe = pd.read_sql_query('SELECT id AS term_fk, LCASE(term_name) AS term_name FROM term', engine)
-	repositoryDataframe['repository_name'] = [x.replace('\xc2\xa0', ' ') for x in repositoryDataframe['repository_name']]
-
-	# Annotate analysis dataframe
-	annotatedDataframe = inputAnalysisDataframe.merge(toolDataframe, left_on='tool', right_on='tool_name', how='left').merge(datasetDataframe, left_on='dataset_accession', right_on='dataset_accession', how='left')
-
-	# Set error if tool not available
-	if annotatedDataframe['tool_fk'].isnull().any():
-	    raise ValueError('Tool(s) '+', '.join(annotatedDataframe.ix[annotatedDataframe['tool_fk'].isnull(), 'tool_fk']).unique+'not in database!')
-
-	# Add new datasets
-	# engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE dataset;')
-	datasetsToUpload = annotatedDataframe.loc[[np.isnan(x) for x in annotatedDataframe['dataset_fk']], 'dataset_accession'].unique()
-	if len(datasetsToUpload) > 0:
-		newDatasetDataframe = pd.DataFrame({x: db.annotate(x) for x in datasetsToUpload}).T.reset_index().rename(columns={'title': 'dataset_title', 'summary': 'dataset_description', 'index': 'dataset_accession'})[['dataset_accession', 'repository_name', 'dataset_title', 'dataset_description', 'dataset_landing_url']]
-		newDatasetDataframe = db.insertData(newDatasetDataframe.merge(repositoryDataframe, on='repository_name', how='left').drop('repository_name', axis=1), 'dataset', connection)
-		datasetIdDict = {rowData['dataset_accession']:rowData['id'] for index, rowData in newDatasetDataframe.iterrows()}
-		for dataset in datasetsToUpload:
-		    annotatedDataframe.loc[annotatedDataframe['dataset_accession'] == dataset, 'dataset_fk'] = datasetIdDict[dataset]
-
-	# Add new analyses
-	# engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE canned_analysis;')
-	analysisDataframe = db.insertData(annotatedDataframe[['dataset_fk', 'tool_fk', 'canned_analysis_url']], 'canned_analysis', connection)
-	analysisIdDict = {index:rowData['id'] for index, rowData in analysisDataframe.iterrows()}
-
-	# Create metadata dataframe
-	annotatedDataframe['metadata'] = [json.loads(x) for x in annotatedDataframe['metadata']]
-	metadataDataframe = pd.DataFrame([{'canned_analysis_fk': analysisIdDict[index], 'term_name': variable, 'value': value} for index, metadataDict in annotatedDataframe['metadata'].iteritems() for variable, value in metadataDict.iteritems()])
-	metadataDataframe['term_name'] = [x.lower() for x in metadataDataframe['term_name']]
-	metadataDataframe = metadataDataframe.merge(termDataframe, on='term_name', how='left')
-
-	# Add new terms
-	# engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE term;')
-	termsToUpload = metadataDataframe.loc[[np.isnan(x) for x in metadataDataframe['term_fk']], 'term_name'].unique()
-	if len(termsToUpload) > 0:
-		newTermDataframe = db.insertData(pd.DataFrame([[term, ''] for term in termsToUpload], columns=['term_name', 'term_description']), 'term', connection)
-		termIdDict = {rowData['term_name']:rowData['id'] for index, rowData in newTermDataframe.iterrows()}
-		for term in termsToUpload:
-		    metadataDataframe.loc[metadataDataframe['term_name'] == term, 'term_fk'] = termIdDict[term]
-	metadataDataframe = metadataDataframe[['canned_analysis_fk', 'term_fk', 'value']]
-
-	# Save
-	if len(datasetsToUpload) > 0:
-		newDatasetDataframe.iloc[:,[5, 0, 4, 3, 1, 2]].to_csv(datasetOutfile, sep='\t', index=False)
-		os.system('touch '+datasetOutfile)
-	analysisDataframe.iloc[:, [3, 0, 1, 2]].to_csv(analysisOutfile, sep='\t', index=False)
-	metadataDataframe.iloc[:, [0, 2, 1]].to_csv(metadataOutfile, sep='\t', index=False)
-	if len(termsToUpload) > 0:
-		newTermDataframe.to_csv(termOutfile, sep='\t', index=False)
-	else:
-		os.system('touch '+termOutfile)
-	                                              
-	# Confirm
-	nb = raw_input('Confirm submission for '+os.path.dirname(loadOutfile)+'? (y/n) ')
-	if nb == 'y':
-	    # Commit
-	    transaction.commit()
-	    
-	    # Add metadata
-	    metadataDataframe.to_sql('canned_analysis_metadata', engine, index=False, if_exists='append')
-	    
-	    # Outfile
-	    os.system('touch '+loadOutfile)
-	else:
-	    transaction.rollback()
-	    for outfile in [datasetOutfile, analysisOutfile, metadataOutfile, termOutfile]:
-	    	os.unlink(outfile)
-
-
+	# Create object
+	analysisTable = CannedAnalysisTable(inputAnalysisDataframe, engine)
+	analysisTable.load_data()
+	analysisTable.write_files(outfiles)
+	analysisTable.commit_transaction(outfiles)
+	
 #######################################################
 #######################################################
 ########## S. 

@@ -4,3 +4,4 @@
 *.sqlite
 *.dir
 f1-mysql.dir/conn.json
+*.pyc
