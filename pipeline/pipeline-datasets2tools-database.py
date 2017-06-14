@@ -13,14 +13,16 @@
 #############################################
 ##### 1. Python modules #####
 from ruffus import *
-import glob, sys, os, time, json
+import glob, sys, os, time, json, requests, random, sqlalchemy
 import pandas as pd
 import numpy as np
 from bs4 import BeautifulSoup
+from datetime import date, timedelta
 
 ##### 2. Custom modules #####
 # Pipeline running
 sys.path.append('pipeline/scripts')
+import PipelineDatasets2toolsDatabase as P
 import db
 from CannedAnalysisTable import CannedAnalysisTable
 
@@ -36,9 +38,12 @@ connectionFile = 'f1-mysql.dir/conn.json'
 repositoryHtmlFile = 'f3-repositories.dir/Repository List _ bioCADDIE Data Discovery Index.htm'
 
 # Canned Analyses
-creedsAnalyses = glob.glob('../datasets2tools-canned-analyses/f1-creeds.dir/*/*-canned_analyses.txt')
-# archsAnalyses = '../datasets2tools-canned-analyses/f1-creeds.dir/archs-canned_analyses.txt'
-# clustergrammerAnalyses = glob.glob('../datasets2tools-canned-analyses/f3-geo.dir/*/*/*-canned_analyses.txt')
+creedsAnalyses = glob.glob('../datasets2tools-canned-analyses/f1-creeds.dir/*/*v1.0-canned_analyses.txt')
+archsAnalyses = ['../datasets2tools-canned-analyses/f1-creeds.dir/archs-canned_analyses.txt']
+clustergrammerAnalyses = glob.glob('../datasets2tools-canned-analyses/f3-geo.dir/*/*/*-canned_analyses.txt')
+lincsAnalyses = glob.glob('../datasets2tools-canned-analyses/f4-lincs.dir/*-canned_analyses.txt')
+genemaniaAnalyses = glob.glob('../datasets2tools-canned-analyses/f5-genemania.dir/*canned_analyses.txt')
+cannedAnalyses = creedsAnalyses
 
 
 ##### 2. Functions #####
@@ -63,10 +68,10 @@ def createDatabase(infiles, outfile):
 	schemaFile, connectionFile = infiles
 
 	# Get dict
-	host, username, password = db.connect(connectionFile, 'localhost', returnData=True)
+	host, username, password = db.connect(connectionFile, 'phpmyadmin', returnData=True)
 
 	# Get command
-	commandString = ''' mysql --user='%(username)s' --password='%(password)s' < %(schemaFile)s; touch %(outfile)s; ''' % locals()
+	commandString = ''' mysql --user='%(username)s' --password='%(password)s' --host='%(host)s' < %(schemaFile)s; touch %(outfile)s; ''' % locals()
 
 	# Run
 	os.system(commandString)
@@ -110,7 +115,7 @@ def loadTools(infiles, outfile):
 	selectedColumns = ['id', 'tool_name', 'tool_icon_url', 'tool_homepage_url', 'tool_description']
 
 	# Get engine
-	engine = db.connect(connectionFile, 'localhost', 'datasets2tools')
+	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
 
 	# Truncate
 	engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE tool; SET FOREIGN_KEY_CHECKS = 1;')
@@ -182,7 +187,7 @@ def loadRepositories(infiles, outfile):
 	repositoryDataframe = pd.read_excel(toolFile, encoding='ascii')
 
 	# Get engine
-	engine = db.connect(connectionFile, 'localhost', 'datasets2tools')
+	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
 
 	# Truncate
 	engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE repository; SET FOREIGN_KEY_CHECKS = 1;')
@@ -193,10 +198,111 @@ def loadRepositories(infiles, outfile):
 	# Outfile
 	os.system('touch %(outfile)s' % locals())
 
+#######################################################
+#######################################################
+########## S4. Datasets
+#######################################################
+#######################################################
+
+#############################################
+########## 1. Annotate Datasets
+#############################################
+
+@follows(mkdir('f4-datasets.dir'))
+
+@transform(cannedAnalyses,
+		   regex(r'.*/(.*).txt'),
+		   r'f4-datasets.dir/\1-datasets.txt')
+
+def annotateGeoDatasets(infile, outfile):
+
+	# Read infile
+	cannedAnalysisDataframe = pd.read_table(infile)
+
+	# Dataset accessions
+	datasetAccessions = cannedAnalysisDataframe['dataset_accession'].unique()
+
+	# Annotate
+	datasetAnnotationDict = {(i+1): P.annotateDataset(e) for i, e in enumerate(datasetAccessions)}
+
+	# Convert to dataframe
+	datasetAnnotationDataframe = pd.DataFrame(datasetAnnotationDict).T
+
+	# Rename columns
+	datasetAnnotationDataframe.rename(columns={'title': 'dataset_title', 'summary': 'dataset_description'}, inplace=True)
+
+	# Drop repository name
+	datasetAnnotationDataframe.drop('repository_name', axis=1, inplace=True)
+
+	# Add repository FK
+	datasetAnnotationDataframe['repository_fk'] = 20
+
+	# Save
+	datasetAnnotationDataframe.to_csv(outfile, sep='\t', index=False)
+	
+#############################################
+########## 2. Get LINCS Datasets
+#############################################
+
+@files(None,
+	   'f4-datasets.dir/lincs-datasets.txt')
+
+def getLincsDatasets(infile, outfile):
+
+	responseDict = requests.post('http://dev3.ccs.miami.edu:8080/dcic/api/fetchdata?searchTerm=*&limit=300').json()
+	datasetDataframe = pd.DataFrame([{x: y[x] if x in y.keys() else '-' for x in ['datasetid', 'datasetname', 'description', 'ldplink']} for y in responseDict['results']['documents']])
+	datasetDataframe['repository_fk'] = 27
+	datasetDataframe.rename(columns={'datasetid': 'dataset_accession', 'datasetname': 'dataset_title', 'description': 'dataset_description', 'ldplink': 'dataset_landing_url'}, inplace=True)
+	datasetDataframe.to_csv(outfile, sep='\t', index=False)
+	
+#############################################
+########## 3. Merge Datasets
+#############################################
+
+@merge(glob.glob('f4-datasets.dir/*-datasets.txt'),
+	   'f4-datasets.dir/datasets.txt')
+
+def mergeDatasets(infiles, outfile):
+
+	# Read infile
+	datasetDataframe = pd.concat([pd.read_table(x) for x in infiles]).drop_duplicates('dataset_accession')
+
+	# Get engine
+	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
+
+	# Save
+	datasetDataframe.to_csv(outfile, sep='\t', index=False)
+	
+#############################################
+########## 4. Upload Datasets
+#############################################
+
+@follows(loadRepositories)
+
+@transform(mergeDatasets,
+		   suffix('.txt'),
+		   '.load')
+
+def loadDatasets(infile, outfile):
+
+	# Read infile
+	datasetDataframe = pd.read_table(infile)
+
+	# Get engine
+	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
+
+	# Truncate
+	engine.execute('SET FOREIGN_KEY_CHECKS = 0; TRUNCATE TABLE dataset; SET FOREIGN_KEY_CHECKS = 1;')
+
+	# Send to SQL
+	datasetDataframe.to_sql('dataset', engine, if_exists='append', index=False)
+
+	# Outfile
+	os.system('touch %(outfile)s' % locals())
 
 #######################################################
 #######################################################
-########## S4. Load Analyses
+########## S5. Load Analyses
 #######################################################
 #######################################################
 
@@ -204,41 +310,163 @@ def loadRepositories(infiles, outfile):
 ########## 1. Load Analyses
 #############################################
 
+@follows(mkdir('f5-analyses.dir'))
+# @follows(loadDatasets)
 
-@follows(mkdir('f4-analyses.dir'))
+@transform(genemaniaAnalyses,
+		   regex(r'.*/(.*).txt'),
+		   r'f5-analyses.dir/\1.load')
 
-def loadJobs():
-	infiles = creedsAnalyses
-	for analysisFile in infiles:
-		outDir = os.path.join('f4-analyses.dir', os.path.basename(analysisFile)[:-len('-canned_analyses.txt')])
-		if not os.path.exists(outDir):
-			os.makedirs(outDir)
-		outfiles = [os.path.join(outDir, '-'.join([os.path.basename(outDir), x])) for x in ['datasets.txt', 'canned_analyses.txt', 'canned_analysis_metadata.txt', 'terms.txt', 'all.load']]
-		yield [[analysisFile, connectionFile], outfiles]
+def loadAnalyses(infile, outfile):
 
-@follows(loadRepositories)
-@files(loadJobs)
+	# Read data
+	cannedAnalysisDataframe = pd.read_table(infile)
 
-def loadAnalyses(infiles, outfiles):
+	# Prepare POST request
+	headers = {'content-type':'application/json'}
+	data = json.dumps({'canned_analyses': [dict(rowData) for index, rowData in cannedAnalysisDataframe.iterrows()]})
 
-	# Split files
-	analysisFile, connectionFile = infiles
+	# Make request
+	requests.post('http://localhost:5000/datasets2tools/api/upload', data=data, headers={'content-type':'application/json'})
 
-	# Read dataframe
-	inputAnalysisDataframe = pd.read_table(analysisFile, index_col='index').dropna().rename(columns={'geo_id': 'dataset_accession', 'link': 'canned_analysis_url', 'tool': 'tool_name'})
+	# Create outfile
+	os.system('touch {outfile}'.format(**locals()))
 
-	# Connect
-	engine = db.connect(connectionFile, 'localhost', 'datasets2tools')
+#######################################################
+#######################################################
+########## S6. Featured Objects
+#######################################################
+#######################################################
 
-	# Print
-	print '\nFor file ' + os.path.basename(outfiles[-1][:-len('.load')]) + ':'
+#############################################
+########## 1. Featured Analyses
+#############################################
 
-	# Create object
-	analysisTable = CannedAnalysisTable(inputAnalysisDataframe, engine)
-	analysisTable.load_data()
-	analysisTable.write_files(outfiles)
-	analysisTable.commit_transaction(outfiles)
-	
+@follows(mkdir('f6-featured.dir'))
+
+@files(None,
+	   'f6-featured.dir/featured-analysis.txt')
+
+def getFeaturedAnalyses(infile, outfile):
+
+	# Get engine
+	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
+
+	# Define dict
+	featured_analysis_dict = {}
+
+	# Get N
+	N = 1500
+
+	# Get IDs
+	canned_analysis_ids = pd.read_sql_query('SELECT DISTINCT id FROM canned_analysis', engine)['id'].tolist()
+	random.shuffle(canned_analysis_ids)
+	featured_analysis_dict['canned_analysis_fk'] = canned_analysis_ids[:N]
+
+	# Get dates
+	startdate = date(2017, 5, 1)
+	featured_analysis_dict['day'] = [startdate+timedelta(days=i+1) for i in range(N)]
+
+	# Get dataframe
+	featured_analysis_dataframe = pd.DataFrame(featured_analysis_dict)
+
+	# Save
+	featured_analysis_dataframe.to_csv(outfile, sep='\t', index=False)
+
+#############################################
+########## 2. Featured Datasets
+#############################################
+
+@files(None,
+	   'f6-featured.dir/featured-dataset.txt')
+
+def getFeaturedDatasets(infile, outfile):
+
+	# Get engine
+	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
+
+	# Define dict
+	featured_dataset_dict = {}
+
+	# Get N
+	N = 1500
+
+	# Get IDs
+	dataset_ids = pd.read_sql_query('SELECT DISTINCT dataset_fk FROM canned_analysis', engine)['dataset_fk'].tolist()
+	random.shuffle(dataset_ids)
+	featured_dataset_dict['dataset_fk'] = dataset_ids[:N]
+
+	# Get dates
+	startdate = date(2017, 5, 1)
+	featured_dataset_dict['day'] = [startdate+timedelta(days=i) for i in range(N)]
+
+	# Get dataframe
+	featured_dataset_dataframe = pd.DataFrame(featured_dataset_dict)
+
+	# Save
+	featured_dataset_dataframe.to_csv(outfile, sep='\t', index=False)
+
+#############################################
+########## 3. Featured Tools
+#############################################
+
+@files(None,
+	   'f6-featured.dir/featured-tool.txt')
+
+def getFeaturedTools(infile, outfile):
+
+	# Get engine
+	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
+
+	# Define dict
+	featured_tool_dict = {'tool_fk': []}
+
+	# Get IDs
+	tool_ids = pd.read_sql_query('SELECT DISTINCT tool_fk FROM canned_analysis', engine)['tool_fk'].tolist()
+	for i in range(50):
+		random.shuffle(tool_ids)
+		featured_tool_dict['tool_fk'] += tool_ids
+
+	# Get dates
+	startdate = date(2017, 5, 1)
+	featured_tool_dict['start_day'] = [startdate+timedelta(days=i*7) for i in range(len(featured_tool_dict['tool_fk']))]
+	featured_tool_dict['end_day'] = [x+timedelta(days=7) for x in featured_tool_dict['start_day']]
+
+	# Get dataframe
+	featured_tool_dataframe = pd.DataFrame(featured_tool_dict)
+
+	# Save
+	featured_tool_dataframe.to_csv(outfile, sep='\t', index=False)
+
+#############################################
+########## 4. Upload Tables
+#############################################
+
+@transform((getFeaturedAnalyses, getFeaturedDatasets, getFeaturedTools),
+		   suffix('.txt'),
+	       '.load')
+
+def loadFeaturedTables(infile, outfile):
+
+	# Read infile
+	featuredDataframe = pd.read_table(infile)
+
+	# Get engine
+	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
+
+	# Get table name
+	tableName = os.path.basename(outfile).split('.')[0].replace('-', '_')
+
+	# Get dtype
+	dtype = {x: sqlalchemy.types.Integer if 'fk' in x else sqlalchemy.types.Date for x in featuredDataframe.columns}
+
+	# Upload
+	featuredDataframe.to_sql(tableName, engine, if_exists='append', index=False, dtype=dtype)
+
+	# Create outfile
+	# os.system('touch '+outfile)
+
+
 #######################################################
 #######################################################
 ########## S. 
