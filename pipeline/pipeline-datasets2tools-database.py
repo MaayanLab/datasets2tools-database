@@ -39,14 +39,8 @@ repositoryHtmlFile = 'f3-repositories.dir/Repository List _ bioCADDIE Data Disco
 
 # Canned Analyses
 creedsAnalyses = glob.glob('../datasets2tools-canned-analyses/f1-creeds.dir/*/*v1.0-canned_analyses.txt')
-archsAnalyses = ['../datasets2tools-canned-analyses/f1-creeds.dir/archs-canned_analyses.txt']
-clustergrammerAnalyses = glob.glob('../datasets2tools-canned-analyses/f3-geo.dir/*/*/*-canned_analyses.txt')
-lincsAnalyses = glob.glob('../datasets2tools-canned-analyses/f4-lincs.dir/*-canned_analyses.txt')
+archs4Analyses = ['../datasets2tools-canned-analyses/f2-archs4.dir/archs4-canned_analyses.txt']
 genemaniaAnalyses = glob.glob('../datasets2tools-canned-analyses/f5-genemania.dir/*canned_analyses.txt')
-cannedAnalyses = creedsAnalyses
-
-
-##### 2. Functions #####
 
 #######################################################
 #######################################################
@@ -111,8 +105,11 @@ def loadTools(infiles, outfile):
 	# Rename
 	toolDataframe = toolDataframe.rename(columns=renameDict)
 
+	# Add date
+	toolDataframe['date'] = '2017-05-22'
+
 	# Select columns
-	selectedColumns = ['id', 'tool_name', 'tool_icon_url', 'tool_homepage_url', 'tool_description']
+	selectedColumns = ['id', 'tool_name', 'tool_icon_url', 'tool_homepage_url', 'tool_description', 'tool_screenshot_url', 'date']
 
 	# Get engine
 	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
@@ -186,6 +183,9 @@ def loadRepositories(infiles, outfile):
 	# Read table
 	repositoryDataframe = pd.read_excel(toolFile, encoding='ascii')
 
+	# Add date
+	repositoryDataframe['date'] = '2017-05-22'
+
 	# Get engine
 	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
 
@@ -210,7 +210,7 @@ def loadRepositories(infiles, outfile):
 
 @follows(mkdir('f4-datasets.dir'))
 
-@transform(cannedAnalyses,
+@transform(creedsAnalyses,
 		   regex(r'.*/(.*).txt'),
 		   r'f4-datasets.dir/\1-datasets.txt')
 
@@ -279,7 +279,7 @@ def mergeDatasets(infiles, outfile):
 
 @follows(loadRepositories)
 
-@transform(mergeDatasets,
+@transform('f4-datasets.dir/datasets.txt',#mergeDatasets,
 		   suffix('.txt'),
 		   '.load')
 
@@ -287,6 +287,9 @@ def loadDatasets(infile, outfile):
 
 	# Read infile
 	datasetDataframe = pd.read_table(infile)
+
+	# Add date
+	datasetDataframe['date'] = '2017-05-22'
 
 	# Get engine
 	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools')
@@ -311,9 +314,8 @@ def loadDatasets(infile, outfile):
 #############################################
 
 @follows(mkdir('f5-analyses.dir'))
-# @follows(loadDatasets)
 
-@transform(genemaniaAnalyses,
+@transform(archs4Analyses,
 		   regex(r'.*/(.*).txt'),
 		   r'f5-analyses.dir/\1.load')
 
@@ -323,14 +325,16 @@ def loadAnalyses(infile, outfile):
 	cannedAnalysisDataframe = pd.read_table(infile)
 
 	# Prepare POST request
+	url = 'http://localhost:5000/datasets2tools/api/upload'
+	data = cannedAnalysisDataframe.to_json()
 	headers = {'content-type':'application/json'}
-	data = json.dumps({'canned_analyses': [dict(rowData) for index, rowData in cannedAnalysisDataframe.iterrows()]})
 
 	# Make request
-	requests.post('http://localhost:5000/datasets2tools/api/upload', data=data, headers={'content-type':'application/json'})
+	response = requests.post(url, data=data, headers=headers)
 
-	# Create outfile
-	os.system('touch {outfile}'.format(**locals()))
+	# Write outfile
+	with open(outfile, 'w') as openfile:
+		openfile.write(response.text)
 
 #######################################################
 #######################################################
@@ -392,7 +396,7 @@ def getFeaturedDatasets(infile, outfile):
 	N = 1500
 
 	# Get IDs
-	dataset_ids = pd.read_sql_query('SELECT DISTINCT dataset_fk FROM canned_analysis', engine)['dataset_fk'].tolist()
+	dataset_ids = pd.read_sql_query('SELECT DISTINCT dataset_fk FROM canned_analysis ca LEFT JOIN dataset d ON d.id=ca.dataset_fk WHERE dataset_title IS NOT NULL', engine)['dataset_fk'].tolist()
 	random.shuffle(dataset_ids)
 	featured_dataset_dict['dataset_fk'] = dataset_ids[:N]
 
@@ -464,7 +468,7 @@ def loadFeaturedTables(infile, outfile):
 	featuredDataframe.to_sql(tableName, engine, if_exists='append', index=False, dtype=dtype)
 
 	# Create outfile
-	# os.system('touch '+outfile)
+	os.system('touch '+outfile)
 
 
 #######################################################
