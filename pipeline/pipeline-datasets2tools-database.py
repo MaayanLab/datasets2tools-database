@@ -40,7 +40,7 @@ repositoryHtmlFile = 'f3-repositories.dir/Repository List _ bioCADDIE Data Disco
 # Canned Analyses
 creedsAnalyses = glob.glob('../datasets2tools-canned-analyses/f1-creeds.dir/*/*v1.0-canned_analyses.txt')
 archs4Analyses = ['../datasets2tools-canned-analyses/f2-archs4.dir/archs4-canned_analyses.txt']
-genemaniaAnalyses = glob.glob('../datasets2tools-canned-analyses/f5-genemania.dir/*canned_analyses.txt')
+genemaniaAnalyses = glob.glob('../datasets2tools-canned-analyses/f3-genemania.dir/genemania-canned_analyses.txt')
 
 #######################################################
 #######################################################
@@ -315,11 +315,16 @@ def loadDatasets(infile, outfile):
 
 @follows(mkdir('f5-analyses.dir'))
 
-@transform(archs4Analyses,
+# creedsAnalyses, archs4Analyses, genemaniaAnalyses
+
+@transform(genemaniaAnalyses,
 		   regex(r'.*/(.*).txt'),
 		   r'f5-analyses.dir/\1.load')
 
 def loadAnalyses(infile, outfile):
+
+	# Print
+	print 'Doing ' + os.path.basename(infile) + '...'
 
 	# Read data
 	cannedAnalysisDataframe = pd.read_table(infile)
@@ -330,9 +335,11 @@ def loadAnalyses(infile, outfile):
 	headers = {'content-type':'application/json'}
 
 	# Make request
+	print 'Uploading...'
 	response = requests.post(url, data=data, headers=headers)
 
 	# Write outfile
+	print 'Writing...'
 	with open(outfile, 'w') as openfile:
 		openfile.write(response.text)
 
