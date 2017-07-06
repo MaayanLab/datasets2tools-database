@@ -42,6 +42,10 @@ creedsAnalyses = glob.glob('../datasets2tools-canned-analyses/f1-creeds.dir/*/*v
 archs4Analyses = ['../datasets2tools-canned-analyses/f2-archs4.dir/archs4-canned_analyses.txt']
 genemaniaAnalyses = glob.glob('../datasets2tools-canned-analyses/f5-genemania.dir/*canned_analyses.txt')
 
+# Processed datasets
+processedDatasetFile = 'f7-processed_datasets.dir/processed_datasets.txt'
+scriptsFile = 'f8-scripts.dir/scripts.xlsx'
+
 #######################################################
 #######################################################
 ########## S1. Create Database
@@ -469,6 +473,63 @@ def loadFeaturedTables(infile, outfile):
 
 	# Create outfile
 	os.system('touch '+outfile)
+
+#######################################################
+#######################################################
+########## S7. Processed Datasets
+#######################################################
+#######################################################
+
+#############################################
+########## 1. Upload
+#############################################
+
+@transform(processedDatasetFile,
+		   suffix('.txt'),
+		   '.load')
+
+def loadProcessedDatasets(infile, outfile):
+
+	# Read table
+	processed_dataset_dataframe = pd.read_table(infile)
+
+	# Get engine
+	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools_dev')
+
+	# Load
+	processed_dataset_dataframe.to_sql('processed_dataset', engine, if_exists='append', index=False)
+
+	# Create outfile
+	os.system('touch {outfile}'.format(**locals()))
+
+#######################################################
+#######################################################
+########## S8. Scripts
+#######################################################
+#######################################################
+
+#############################################
+########## 1. Upload
+#############################################
+
+@transform(scriptsFile,
+		   suffix('.xlsx'),
+		   '.load')
+
+def loadScripts(infile, outfile):
+
+	# Read table
+	scripts_dataframe = pd.read_excel(infile)
+
+	# Get engine
+	engine = db.connect(connectionFile, 'phpmyadmin', 'datasets2tools_dev')
+
+	# Load
+	scripts_dataframe['id'] = [x+1 for x in scripts_dataframe.index]
+	scripts_dataframe.to_sql('script', engine, if_exists='replace', index=False)
+
+	# Create outfile
+	os.system('touch {outfile}'.format(**locals()))
 
 
 #######################################################
